@@ -1182,7 +1182,11 @@ async function convertVideoFallback(btn){
   var mime='';
   for(var ti=0;ti<types.length;ti++){try{if(MediaRecorder.isTypeSupported(types[ti])){mime=types[ti];break;}}catch(e){}}
   if(!mime){setSt('vid','Nessun formato supportato.',true);btn.disabled=false;startRaf();return;}
-  var stream;try{stream=streamFn.call(ec,30);}catch(e){setSt('vid','Errore stream.',true);btn.disabled=false;startRaf();return;}
+  var canvasStream;try{canvasStream=streamFn.call(ec,30);}catch(e){setSt('vid','Errore stream.',true);btn.disabled=false;startRaf();return;}
+  // Capture audio from the video element and combine with canvas video track
+  var audioTracks=[];
+  try{var vaCapture=va.captureStream||va.mozCaptureStream;if(vaCapture){var vaStream=vaCapture.call(va);audioTracks=vaStream.getAudioTracks();}}catch(e){}
+  var stream=audioTracks.length>0?new MediaStream([].concat(canvasStream.getVideoTracks(),audioTracks)):canvasStream;
   var rec;try{rec=new MediaRecorder(stream,{mimeType:mime,videoBitsPerSecond:2500000});}catch(e){setSt('vid','Errore MediaRecorder.',true);btn.disabled=false;startRaf();return;}
   vidChunks=[];
   rec.ondataavailable=function(e){if(e.data&&e.data.size>0)vidChunks.push(e.data);};
@@ -1212,7 +1216,7 @@ async function convertVideoFallback(btn){
     btn.disabled=false;btn.textContent='Converti e scarica video';startRaf();
   };
   rec.onerror=function(e){clearInterval(etaIv);setSt('vid','Errore: '+(e.error?e.error.message:e),true);btn.disabled=false;startRaf();};
-  va.muted=true;va.playbackRate=1.0;va.currentTime=0;
+  va.muted=false;va.playbackRate=1.0;va.currentTime=0;
   await new Promise(function(r){var fn=function(){va.removeEventListener('seeked',fn);r();};va.addEventListener('seeked',fn);});
   if(!dur||isNaN(dur)||dur<=0){setSt('vid','Durata non disponibile.',true);btn.disabled=false;startRaf();return;}
   va.onended=function(){stopRec();};
