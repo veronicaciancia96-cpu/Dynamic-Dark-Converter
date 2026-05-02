@@ -1172,9 +1172,7 @@ document.getElementById('vid-btn').addEventListener('click',async function(){
 async function convertVideoFallback(btn){
   var srcW=va.videoWidth,srcH=va.videoHeight;
   if(!srcW||!srcH){setSt('vid','Dimensioni non disponibili.',true);btn.disabled=false;startRaf();return;}
-  var streamFn=null;
-  if(typeof HTMLCanvasElement!=='undefined'){var tc=document.createElement('canvas');streamFn=tc.captureStream||tc.mozCaptureStream||null;}
-  if(!streamFn||typeof MediaRecorder==='undefined'){setSt('vid','⚠️ Conversione non disponibile in questo browser.',true);btn.disabled=false;startRaf();return;}
+  if(typeof MediaRecorder==='undefined'){setSt('vid','⚠️ Conversione non disponibile in questo browser.',true);btn.disabled=false;startRaf();return;}
   var MAX_W=1280,scale=Math.min(1,MAX_W/srcW),w=Math.round(srcW*scale),h=Math.round(srcH*scale);
   var ec=document.createElement('canvas');ec.width=w;ec.height=h;var ex=ec.getContext('2d');
   var prefMp4=(vidExt==='mp4'||vidExt==='mov'||vidExt==='m4v');
@@ -1182,15 +1180,41 @@ async function convertVideoFallback(btn){
   var mime='';
   for(var ti=0;ti<types.length;ti++){try{if(MediaRecorder.isTypeSupported(types[ti])){mime=types[ti];break;}}catch(e){}}
   if(!mime){setSt('vid','Nessun formato supportato.',true);btn.disabled=false;startRaf();return;}
-  var canvasStream;try{canvasStream=streamFn.call(ec,30);}catch(e){setSt('vid','Errore stream.',true);btn.disabled=false;startRaf();return;}
-  // Capture audio from the video element and combine with canvas video track
+
+  // 1. Unmute and seek to start BEFORE capturing any stream
+  var dur=va.duration;
+  va.muted=false;va.playbackRate=1.0;va.currentTime=0;
+  await new Promise(function(r){var fn=function(){va.removeEventListener('seeked',fn);r();};va.addEventListener('seeked',fn);});
+  if(!dur||isNaN(dur)||dur<=0){setSt('vid','Durata non disponibile.',true);btn.disabled=false;startRaf();return;}
+
+  // 2. Capture canvas video stream (with filter) + audio stream from video element
+  var canvasStream;
+  try{canvasStream=ec.captureStream?ec.captureStream(30):ec.mozCaptureStream(30);}catch(e){setSt('vid','Errore stream canvas.',true);btn.disabled=false;startRaf();return;}
+
+  // 3. Route video audio through Web Audio API so MediaRecorder captures it reliably
   var audioTracks=[];
-  try{var vaCapture=va.captureStream||va.mozCaptureStream;if(vaCapture){var vaStream=vaCapture.call(va);audioTracks=vaStream.getAudioTracks();}}catch(e){}
-  var stream=audioTracks.length>0?new MediaStream([].concat(canvasStream.getVideoTracks(),audioTracks)):canvasStream;
-  var rec;try{rec=new MediaRecorder(stream,{mimeType:mime,videoBitsPerSecond:2500000});}catch(e){setSt('vid','Errore MediaRecorder.',true);btn.disabled=false;startRaf();return;}
+  try{
+    var AudioCtx=window.AudioContext||window.webkitAudioContext;
+    if(AudioCtx){
+      if(!va._audioCtx){
+        va._audioCtx=new AudioCtx();
+        va._audioSrc=va._audioCtx.createMediaElementSource(va);
+        va._audioSrc.connect(va._audioCtx.destination); // keep speakers active
+      }
+      var audioDest=va._audioCtx.createMediaStreamDestination();
+      va._audioSrc.connect(audioDest);
+      audioTracks=audioDest.stream.getAudioTracks();
+    }
+  }catch(e){}
+
+  // 4. Build combined stream: filtered video from canvas + original audio
+  var videoTracks=canvasStream.getVideoTracks();
+  var combined=new MediaStream([].concat(videoTracks,audioTracks));
+
+  var rec;try{rec=new MediaRecorder(combined,{mimeType:mime,videoBitsPerSecond:2500000});}catch(e){setSt('vid','Errore MediaRecorder.',true);btn.disabled=false;startRaf();return;}
   vidChunks=[];
   rec.ondataavailable=function(e){if(e.data&&e.data.size>0)vidChunks.push(e.data);};
-  var flt=F,dur=va.duration,startTs=null,frameIv=null;
+  var flt=F,startTs=null,frameIv=null;
   var recStopped=false;
   function stopRec(){
     if(recStopped)return;recStopped=true;
@@ -1216,9 +1240,6 @@ async function convertVideoFallback(btn){
     btn.disabled=false;btn.textContent='Converti e scarica video';startRaf();
   };
   rec.onerror=function(e){clearInterval(etaIv);setSt('vid','Errore: '+(e.error?e.error.message:e),true);btn.disabled=false;startRaf();};
-  va.muted=false;va.playbackRate=1.0;va.currentTime=0;
-  await new Promise(function(r){var fn=function(){va.removeEventListener('seeked',fn);r();};va.addEventListener('seeked',fn);});
-  if(!dur||isNaN(dur)||dur<=0){setSt('vid','Durata non disponibile.',true);btn.disabled=false;startRaf();return;}
   va.onended=function(){stopRec();};
   rec.start(100);startTs=Date.now();
   try{await va.play();}catch(e){clearInterval(etaIv);setSt('vid','Errore avvio video.',true);btn.disabled=false;startRaf();return;}
@@ -1230,10 +1251,8 @@ async function convertVideoFallback(btn){
     setBar('vid',Math.round((va.currentTime/dur)*100));
   }
   if(va.requestVideoFrameCallback){
-    // Fires per video frame — not throttled by Chrome's background/DevTools throttling
     (function onVFC(){if(recStopped)return;drawFrame();va.requestVideoFrameCallback(onVFC);})();
   }else{
-    // Fallback: setInterval at 30fps (more reliable than RAF under throttling)
     frameIv=setInterval(drawFrame,33);
   }
 }
