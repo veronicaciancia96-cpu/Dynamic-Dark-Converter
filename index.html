@@ -1201,6 +1201,8 @@ async function convertVideoFallback(btn){
         va._audioSrc=va._audioCtx.createMediaElementSource(va);
         va._audioSrc.connect(va._audioCtx.destination); // keep speakers active
       }
+      // Chrome starts AudioContext suspended — MUST resume or video stalls
+      if(va._audioCtx.state==='suspended'){await va._audioCtx.resume();}
       var audioDest=va._audioCtx.createMediaStreamDestination();
       va._audioSrc.connect(audioDest);
       audioTracks=audioDest.stream.getAudioTracks();
