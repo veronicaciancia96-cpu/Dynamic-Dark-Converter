@@ -1102,7 +1102,9 @@ async function getFFmpeg(){
 document.getElementById('vid-btn').addEventListener('click',async function(){
   if(!vURL)return;
   var btn=this;
-  btn.disabled=true;stopRaf();setSt('vid',sp('Avvio conversione...'));setBar('vid',0);
+  // Keep display RAF running during conversion: stopping it makes Chrome
+  // throttle the page (and therefore the video decoder) by ~9x.
+  btn.disabled=true;setSt('vid',sp('Avvio conversione...'));setBar('vid',0);
 
   var fk=Object.keys(FILTERS).find(function(k){return FILTERS[k]===F;})||'night';
   var vfStr=FFVF[fk];
@@ -1183,37 +1185,36 @@ async function convertVideoFallback(btn){
 
   // 1. Unmute and seek to start BEFORE capturing any stream
   var dur=va.duration;
-  va.muted=false;va.playbackRate=1.0;va.currentTime=0;
+  va.muted=false;va.volume=1.0;va.playbackRate=1.0;va.currentTime=0;
   await new Promise(function(r){var fn=function(){va.removeEventListener('seeked',fn);r();};va.addEventListener('seeked',fn);});
   if(!dur||isNaN(dur)||dur<=0){setSt('vid','Durata non disponibile.',true);btn.disabled=false;startRaf();return;}
 
-  // 2. Capture canvas video stream (with filter) + audio stream from video element
+  // 2. Capture canvas video stream (filtered)
   var canvasStream;
   try{canvasStream=ec.captureStream?ec.captureStream(30):ec.mozCaptureStream(30);}catch(e){setSt('vid','Errore stream canvas.',true);btn.disabled=false;startRaf();return;}
 
-  // 3. Route video audio through Web Audio API so MediaRecorder captures it reliably
+  // 3. Capture audio from video element via captureStream() — must run AFTER unmute
   var audioTracks=[];
   try{
-    var AudioCtx=window.AudioContext||window.webkitAudioContext;
-    if(AudioCtx){
-      if(!va._audioCtx){
-        va._audioCtx=new AudioCtx();
-        va._audioSrc=va._audioCtx.createMediaElementSource(va);
-        va._audioSrc.connect(va._audioCtx.destination); // keep speakers active
-      }
-      // Chrome starts AudioContext suspended — MUST resume or video stalls
-      if(va._audioCtx.state==='suspended'){await va._audioCtx.resume();}
-      var audioDest=va._audioCtx.createMediaStreamDestination();
-      va._audioSrc.connect(audioDest);
-      audioTracks=audioDest.stream.getAudioTracks();
+    var vaCaptureFn=va.captureStream||va.mozCaptureStream;
+    if(vaCaptureFn){
+      var vaStream=vaCaptureFn.call(va);
+      audioTracks=vaStream.getAudioTracks();
+      console.log('[DDC] Audio tracks captured:',audioTracks.length,audioTracks.map(function(t){return {label:t.label,enabled:t.enabled,muted:t.muted,readyState:t.readyState};}));
+    }else{
+      console.warn('[DDC] captureStream not available on video element');
     }
-  }catch(e){}
+  }catch(e){console.warn('[DDC] captureStream error:',e);}
 
   // 4. Build combined stream: filtered video from canvas + original audio
   var videoTracks=canvasStream.getVideoTracks();
   var combined=new MediaStream([].concat(videoTracks,audioTracks));
+  console.log('[DDC] Combined stream tracks:',combined.getTracks().length,'(',videoTracks.length,'video +',audioTracks.length,'audio)');
 
-  var rec;try{rec=new MediaRecorder(combined,{mimeType:mime,videoBitsPerSecond:2500000});}catch(e){setSt('vid','Errore MediaRecorder.',true);btn.disabled=false;startRaf();return;}
+  // Choose appropriate audio bitrate; only set if we actually have audio
+  var recOpts={mimeType:mime,videoBitsPerSecond:2500000};
+  if(audioTracks.length>0)recOpts.audioBitsPerSecond=128000;
+  var rec;try{rec=new MediaRecorder(combined,recOpts);}catch(e){setSt('vid','Errore MediaRecorder: '+e.message,true);btn.disabled=false;startRaf();return;}
   vidChunks=[];
   rec.ondataavailable=function(e){if(e.data&&e.data.size>0)vidChunks.push(e.data);};
   var flt=F,startTs=null,frameIv=null;
@@ -1238,13 +1239,16 @@ async function convertVideoFallback(btn){
     document.body.appendChild(a);a.click();document.body.removeChild(a);
     setTimeout(function(){URL.revokeObjectURL(blobURL);},30000);
     var mb=(vidBlob.size/1024/1024).toFixed(1);
-    setBar('vid',100);setSt('vid','✓ Scaricato — '+mb+' MB');
+    setBar('vid',100);setSt('vid','✓ Scaricato — '+mb+' MB'+(audioTracks.length?' (con audio)':' (senza audio)'));
     btn.disabled=false;btn.textContent='Converti e scarica video';startRaf();
   };
   rec.onerror=function(e){clearInterval(etaIv);setSt('vid','Errore: '+(e.error?e.error.message:e),true);btn.disabled=false;startRaf();};
   va.onended=function(){stopRec();};
+
+  // Start recording, then begin playback. va.play() must follow rec.start so first frames are captured
   rec.start(100);startTs=Date.now();
-  try{await va.play();}catch(e){clearInterval(etaIv);setSt('vid','Errore avvio video.',true);btn.disabled=false;startRaf();return;}
+  try{await va.play();}catch(e){clearInterval(etaIv);setSt('vid','Errore avvio video: '+e.message,true);btn.disabled=false;startRaf();return;}
+
   function drawFrame(){
     if(recStopped)return;
     if(va.ended||va.currentTime>=dur-0.15){stopRec();return;}
