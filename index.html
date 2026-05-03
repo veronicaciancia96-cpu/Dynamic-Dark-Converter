@@ -17,12 +17,14 @@
         .card { border: 1px solid #1e1e1e; border-radius: 10px; overflow: hidden; background: #141414; }
         .clbl { font-size: 10px; font-weight: 700; color: #888; padding: 8px 12px; border-bottom: 1px solid #1e1e1e; text-transform: uppercase; letter-spacing: .05em; }
         .cbody { padding: 10px; background: #000; display: flex; align-items: center; justify-content: center; min-height: 200px; }
-        canvas, img { max-width: 100%; height: auto; border-radius: 4px; }
+        canvas, img, video { max-width: 100%; height: auto; border-radius: 4px; }
         .btn { display: block; width: 100%; margin-top: 15px; padding: 12px; font-size: 14px; font-weight: 600; cursor: pointer; border: none; border-radius: 8px; background: #4ade80; color: #06200d; transition: 0.2s; }
         .btn:hover { background: #22c55e; }
         .btn:disabled { opacity: 0.3; cursor: not-allowed; }
         .st { font-size: 12px; color: #888; margin-top: 10px; text-align: center; min-height: 18px; }
         .err { color: #f87171; }
+        .progress { width: 100%; height: 4px; background: #1e1e1e; border-radius: 2px; margin-top: 10px; overflow: hidden; }
+        .progress-bar { height: 100%; background: #4ade80; width: 0%; transition: width 0.3s; }
     </style>
 
 <!-- STANDALONE INLINE LIBS -->
@@ -514,81 +516,307 @@ if(window.location.protocol==='file:'){
 <body>
 
 <div class="app">
-    <h1>Dynamic Dark Converter</h1>
+    <h1>🎬 Dynamic Dark Converter</h1>
     
     <label class="drop" id="dropZone">
-        <input type="file" id="fileInput" accept="image/*">
-        <p>Trascina un'immagine o clicca per caricare</p>
-        <small style="color:#444">Supporta PNG, JPG, WebP</small>
+        <input type="file" id="fileInput" accept="image/*,video/*,.pdf,.docx">
+        <p>Trascina un file o clicca per caricare</p>
+        <small style="color:#444">Immagini (PNG,JPG,WebP) • Video (MP4,WebM) • PDF • DOCX</small>
     </label>
 
     <div id="previewArea" style="display:none;">
         <div class="split">
             <div class="card">
-                <div class="clbl">Originale (Chiara)</div>
-                <div class="cbody"><img id="origImg"></div>
+                <div class="clbl">Originale</div>
+                <div class="cbody">
+                    <img id="origImg" style="display:none;">
+                    <video id="origVideo" controls style="display:none; max-width:100%;"></video>
+                    <div id="origDoc" style="display:none; padding:20px; color:#ccc; max-height:300px; overflow-y:auto;"></div>
+                </div>
             </div>
             <div class="card">
                 <div class="clbl">Anteprima Dark</div>
-                <div class="cbody"><canvas id="destCanvas"></canvas></div>
+                <div class="cbody">
+                    <canvas id="destCanvas" style="display:none;"></canvas>
+                    <video id="destVideo" controls style="display:none; max-width:100%;"></video>
+                    <div id="destDoc" style="display:none; padding:20px; color:#ccc; max-height:300px; overflow-y:auto; filter:invert(1) hue-rotate(180deg);"></div>
+                </div>
             </div>
         </div>
         
-        <button class="btn" id="dlBtn">Scarica Versione Dark</button>
-        <p id="status" class="st"></p>
+        <div class="progress" id="progressContainer" style="display:none;">
+            <div class="progress-bar" id="progressBar"></div>
+        </div>
+        
+        <button class="btn" id="dlBtn" disabled>Scarica Versione Dark</button>
+        <p id="status" class="st">Pronto</p>
     </div>
 </div>
 
+<!-- Librerie caricate da CDN con fallback -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.6.0/mammoth.browser.min.js"></script>
+
 <script>
+    // ==================== CONFIGURAZIONE ====================
+    // Imposta publicPath manualmente per evitare l'errore
+    if (typeof __webpack_public_path__ !== 'undefined') {
+        __webpack_public_path__ = window.location.origin + '/';
+    }
+    
+    // Override per dynamic imports
+    window.publicPath = window.location.origin + '/Dynamic-Dark-Converter/';
+    
+    // ==================== ELEMENTI DOM ====================
     const fileInput = document.getElementById('fileInput');
     const origImg = document.getElementById('origImg');
+    const origVideo = document.getElementById('origVideo');
+    const origDoc = document.getElementById('origDoc');
     const destCanvas = document.getElementById('destCanvas');
+    const destVideo = document.getElementById('destVideo');
+    const destDoc = document.getElementById('destDoc');
     const dlBtn = document.getElementById('dlBtn');
     const status = document.getElementById('status');
     const previewArea = document.getElementById('previewArea');
+    const progressBar = document.getElementById('progressBar');
+    const progressContainer = document.getElementById('progressContainer');
     const ctx = destCanvas.getContext('2d');
-
+    
+    let currentFile = null;
+    let processedBlob = null;
+    let currentType = null; // 'image', 'video', 'pdf', 'docx'
+    
+    // ==================== PDF.JS SETUP ====================
+    if (typeof window.pdfjsLib !== 'undefined') {
+        window.pdfjsLib.GlobalWorkerOptions.workerSrc = 
+            'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+    }
+    
+    // ==================== FILE HANDLING ====================
     fileInput.addEventListener('change', function(e) {
         const file = e.target.files[0];
         if (!file) return;
-
-        const reader = new FileReader();
-        reader.onload = function(event) {
-            origImg.src = event.target.result;
-            origImg.onload = processImage;
-            previewArea.style.display = 'block';
-        };
-        reader.readAsDataURL(file);
+        currentFile = file;
+        handleFile(file);
     });
-
-    function processImage() {
+    
+    function handleFile(file) {
         status.textContent = "Elaborazione in corso...";
         status.classList.remove('err');
-
-        // Imposta dimensioni canvas
+        dlBtn.disabled = true;
+        progressContainer.style.display = 'none';
+        
+        // Reset display
+        [origImg, origVideo, origDoc, destCanvas, destVideo, destDoc].forEach(el => {
+            if (el) el.style.display = 'none';
+        });
+        
+        const url = URL.createObjectURL(file);
+        previewArea.style.display = 'block';
+        
+        if (file.type.startsWith('image/')) {
+            currentType = 'image';
+            origImg.style.display = 'block';
+            destCanvas.style.display = 'block';
+            origImg.src = url;
+            origImg.onload = () => { processImage(); URL.revokeObjectURL(url); };
+            origImg.onerror = () => showError('Errore nel caricamento immagine');
+        } 
+        else if (file.type.startsWith('video/')) {
+            currentType = 'video';
+            origVideo.style.display = 'block';
+            destVideo.style.display = 'block';
+            origVideo.src = url;
+            origVideo.onloadedmetadata = () => { processVideo(); URL.revokeObjectURL(url); };
+            origVideo.onerror = () => showError('Errore nel caricamento video');
+        } 
+        else if (file.name.endsWith('.pdf')) {
+            currentType = 'pdf';
+            origDoc.style.display = 'block';
+            destDoc.style.display = 'block';
+            processPDF(file);
+        } 
+        else if (file.name.endsWith('.docx')) {
+            currentType = 'docx';
+            origDoc.style.display = 'block';
+            destDoc.style.display = 'block';
+            processDOCX(file);
+        } 
+        else {
+            showError('Formato non supportato');
+            previewArea.style.display = 'none';
+        }
+    }
+    
+    // ==================== IMMAGINI ====================
+    function processImage() {
         destCanvas.width = origImg.naturalWidth;
         destCanvas.height = origImg.naturalHeight;
-
-        // Disegna originale
+        
+        ctx.filter = 'none';
         ctx.drawImage(origImg, 0, 0);
-
-        // Applica inversione intelligente (Dark Mode)
-        // Utilizziamo filtri CSS su canvas per massime prestazioni
         ctx.filter = 'invert(1) hue-rotate(180deg) brightness(0.9) contrast(1.1)';
         ctx.drawImage(destCanvas, 0, 0);
         ctx.filter = 'none';
-
-        status.textContent = "Conversione completata.";
+        
+        destCanvas.toBlob((blob) => {
+            processedBlob = blob;
+            dlBtn.disabled = false;
+            status.textContent = "✅ Conversione immagine completata";
+        }, 'image/png');
     }
-
+    
+    // ==================== VIDEO ====================
+    function processVideo() {
+        // Anteprima con filtro CSS
+        destVideo.src = origVideo.src;
+        destVideo.style.filter = 'invert(1) hue-rotate(180deg) brightness(0.9) contrast(1.1)';
+        destVideo.load();
+        
+        // Per il download video, usiamo MediaRecorder con canvas
+        progressContainer.style.display = 'block';
+        status.textContent = "Preparazione conversione video...";
+        
+        const canvas = document.createElement('canvas');
+        const ctx2 = canvas.getContext('2d');
+        
+        origVideo.currentTime = 0;
+        origVideo.play();
+        
+        const stream = canvas.captureStream(30);
+        const mediaRecorder = new MediaRecorder(stream, {
+            mimeType: 'video/webm; codecs=vp9'
+        });
+        
+        const chunks = [];
+        mediaRecorder.ondataavailable = e => chunks.push(e.data);
+        mediaRecorder.onstop = () => {
+            processedBlob = new Blob(chunks, { type: 'video/webm' });
+            dlBtn.disabled = false;
+            status.textContent = "✅ Conversione video completata";
+            progressContainer.style.display = 'none';
+        };
+        
+        origVideo.onplay = () => {
+            mediaRecorder.start();
+            
+            function drawFrame() {
+                if (origVideo.paused || origVideo.ended) {
+                    mediaRecorder.stop();
+                    origVideo.pause();
+                    return;
+                }
+                
+                canvas.width = origVideo.videoWidth;
+                canvas.height = origVideo.videoHeight;
+                ctx2.filter = 'invert(1) hue-rotate(180deg) brightness(0.9) contrast(1.1)';
+                ctx2.drawImage(origVideo, 0, 0, canvas.width, canvas.height);
+                
+                const progress = (origVideo.currentTime / origVideo.duration) * 100;
+                progressBar.style.width = progress + '%';
+                
+                requestAnimationFrame(drawFrame);
+            }
+            drawFrame();
+        };
+    }
+    
+    // ==================== PDF ====================
+    async function processPDF(file) {
+        if (typeof window.pdfjsLib === 'undefined') {
+            showError('Libreria PDF non disponibile');
+            return;
+        }
+        
+        status.textContent = "Elaborazione PDF...";
+        progressContainer.style.display = 'block';
+        progressBar.style.width = '10%';
+        
+        try {
+            const arrayBuffer = await file.arrayBuffer();
+            const pdf = await window.pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+            
+            let fullHTML = '<div style="font-family:sans-serif;">';
+            
+            for (let i = 1; i <= pdf.numPages; i++) {
+                const page = await pdf.getPage(i);
+                const textContent = await page.getTextContent();
+                const text = textContent.items.map(item => item.str).join(' ');
+                fullHTML += `<p style="margin-bottom:10px;">${text}</p>`;
+                progressBar.style.width = ((i / pdf.numPages) * 100) + '%';
+            }
+            
+            fullHTML += '</div>';
+            
+            origDoc.innerHTML = fullHTML;
+            destDoc.innerHTML = fullHTML;
+            
+            processedBlob = new Blob([fullHTML], { type: 'text/html' });
+            dlBtn.disabled = false;
+            status.textContent = "✅ Conversione PDF completata";
+            progressContainer.style.display = 'none';
+        } catch (err) {
+            showError('Errore elaborazione PDF: ' + err.message);
+        }
+    }
+    
+    // ==================== DOCX ====================
+    async function processDOCX(file) {
+        if (typeof window.mammoth === 'undefined') {
+            showError('Libreria DOCX non disponibile');
+            return;
+        }
+        
+        status.textContent = "Elaborazione DOCX...";
+        progressContainer.style.display = 'block';
+        progressBar.style.width = '30%';
+        
+        try {
+            const arrayBuffer = await file.arrayBuffer();
+            const result = await window.mammoth.convertToHtml({ arrayBuffer });
+            
+            progressBar.style.width = '80%';
+            
+            origDoc.innerHTML = result.value;
+            destDoc.innerHTML = result.value;
+            
+            processedBlob = new Blob([result.value], { type: 'text/html' });
+            dlBtn.disabled = false;
+            status.textContent = "✅ Conversione DOCX completata";
+            progressContainer.style.display = 'none';
+        } catch (err) {
+            showError('Errore elaborazione DOCX: ' + err.message);
+        }
+    }
+    
+    // ==================== DOWNLOAD ====================
     dlBtn.addEventListener('click', () => {
+        if (!processedBlob) {
+            showError('Nessun file elaborato');
+            return;
+        }
+        
+        let filename = 'dark-version';
+        if (currentType === 'image') filename += '.png';
+        else if (currentType === 'video') filename += '.webm';
+        else filename += '.html';
+        
         const link = document.createElement('a');
-        link.download = 'dark-version.png';
-        link.href = destCanvas.toDataURL('image/png');
+        link.download = filename;
+        link.href = URL.createObjectURL(processedBlob);
         link.click();
+        URL.revokeObjectURL(link.href);
+        status.textContent = "✅ Download completato";
     });
-
-    // Drag and drop handlers
+    
+    // ==================== UTILITY ====================
+    function showError(msg) {
+        status.textContent = msg;
+        status.classList.add('err');
+    }
+    
+    // ==================== DRAG & DROP ====================
     const dropZone = document.getElementById('dropZone');
     ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(name => {
         dropZone.addEventListener(name, e => {
@@ -596,11 +824,13 @@ if(window.location.protocol==='file:'){
             e.stopPropagation();
         });
     });
-
+    
     dropZone.addEventListener('drop', e => {
         const dt = e.dataTransfer;
-        fileInput.files = dt.files;
-        fileInput.dispatchEvent(new Event('change'));
+        if (dt.files.length > 0) {
+            fileInput.files = dt.files;
+            fileInput.dispatchEvent(new Event('change'));
+        }
     });
 </script>
 
