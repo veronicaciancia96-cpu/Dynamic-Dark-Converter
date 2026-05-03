@@ -7,24 +7,34 @@
     <style>
         * { box-sizing: border-box; margin: 0; padding: 0; }
         body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #0d0d0d; color: #e0e0e0; padding: 1.5rem 1rem; }
-        .app { width: 100%; max-width: 780px; margin: 0 auto; background: #111; border-radius: 14px; padding: 1.5rem; border: 1px solid #1e1e1e; }
+        .app { width: 100%; max-width: 900px; margin: 0 auto; background: #111; border-radius: 14px; padding: 1.5rem; border: 1px solid #1e1e1e; }
         h1 { font-size: 22px; font-weight: 700; color: #f0f0f0; margin-bottom: 1.25rem; display: flex; align-items: center; gap: 10px; }
         .drop { border: 1.5px dashed #2a2a2a; border-radius: 10px; padding: 2rem; text-align: center; cursor: pointer; background: #0d0d0d; transition: .15s; display: block; margin-bottom: 1rem; }
         .drop:hover { border-color: #4ade80; background: #161616; }
         .drop p { font-size: 14px; color: #888; margin-top: 10px; }
         input[type=file] { display: none; }
-        .split { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin-top: 15px; }
+        .preview-container { display: grid; grid-template-columns: 1fr; gap: 15px; margin-top: 15px; }
+        @media (min-width: 768px) { .preview-container { grid-template-columns: 1fr 1fr; } }
         .card { border: 1px solid #1e1e1e; border-radius: 10px; overflow: hidden; background: #141414; }
-        .clbl { font-size: 10px; font-weight: 700; color: #888; padding: 8px 12px; border-bottom: 1px solid #1e1e1e; text-transform: uppercase; letter-spacing: .05em; }
-        .cbody { padding: 10px; background: #000; display: flex; align-items: center; justify-content: center; min-height: 200px; }
-        canvas, img, video { max-width: 100%; height: auto; border-radius: 4px; }
-        .btn { display: block; width: 100%; margin-top: 15px; padding: 12px; font-size: 14px; font-weight: 600; cursor: pointer; border: none; border-radius: 8px; background: #4ade80; color: #06200d; transition: 0.2s; }
-        .btn:hover { background: #22c55e; }
+        .card-header { font-size: 10px; font-weight: 700; color: #888; padding: 8px 12px; border-bottom: 1px solid #1e1e1e; text-transform: uppercase; letter-spacing: .05em; display: flex; justify-content: space-between; align-items: center; }
+        .card-body { padding: 10px; background: #000; display: flex; align-items: center; justify-content: center; min-height: 200px; position: relative; }
+        canvas, img, video { max-width: 100%; max-height: 400px; border-radius: 4px; }
+        .btn { display: inline-flex; align-items: center; justify-content: center; gap: 8px; padding: 12px 24px; font-size: 14px; font-weight: 600; cursor: pointer; border: none; border-radius: 8px; background: #4ade80; color: #06200d; transition: 0.2s; width: 100%; margin-top: 12px; }
+        .btn:hover:not(:disabled) { background: #22c55e; transform: translateY(-1px); }
         .btn:disabled { opacity: 0.3; cursor: not-allowed; }
-        .st { font-size: 12px; color: #888; margin-top: 10px; text-align: center; min-height: 18px; }
-        .err { color: #f87171; }
-        .progress { width: 100%; height: 4px; background: #1e1e1e; border-radius: 2px; margin-top: 10px; overflow: hidden; }
-        .progress-bar { height: 100%; background: #4ade80; width: 0%; transition: width 0.3s; }
+        .btn-secondary { background: #1e1e1e; color: #e0e0e0; margin-top: 8px; }
+        .btn-secondary:hover:not(:disabled) { background: #2a2a2a; }
+        .status-bar { font-size: 12px; color: #888; margin-top: 10px; text-align: center; min-height: 18px; }
+        .error { color: #f87171; }
+        .progress-container { width: 100%; height: 6px; background: #1e1e1e; border-radius: 3px; margin-top: 10px; overflow: hidden; }
+        .progress-fill { height: 100%; background: linear-gradient(90deg, #4ade80, #22c55e); width: 0%; transition: width 0.3s; border-radius: 3px; }
+        .time-estimate { font-size: 11px; color: #666; text-align: center; margin-top: 4px; }
+        .controls { display: flex; gap: 8px; margin-top: 12px; }
+        .controls .btn { flex: 1; }
+        .hidden { display: none !important; }
+        .video-overlay { position: absolute; top: 0; left: 0; right: 0; bottom: 0; display: flex; align-items: center; justify-content: center; background: rgba(0,0,0,0.7); border-radius: 4px; }
+        .spinner { width: 40px; height: 40px; border: 3px solid #1e1e1e; border-top-color: #4ade80; border-radius: 50%; animation: spin 0.8s linear infinite; }
+        @keyframes spin { to { transform: rotate(360deg); } }
     </style>
 
 <!-- STANDALONE INLINE LIBS -->
@@ -520,53 +530,64 @@ if(window.location.protocol==='file:'){
     
     <label class="drop" id="dropZone">
         <input type="file" id="fileInput" accept="image/*,video/*,.pdf,.docx">
-        <p>Trascina un file o clicca per caricare</p>
-        <small style="color:#444">Immagini (PNG,JPG,WebP) • Video (MP4,WebM) • PDF • DOCX</small>
+        <p>📁 Trascina un file o clicca per caricare</p>
+        <small style="color:#444">Immagini • Video (MP4, WebM) • PDF • DOCX</small>
     </label>
 
-    <div id="previewArea" style="display:none;">
-        <div class="split">
+    <div id="previewArea" class="hidden">
+        <div class="preview-container">
             <div class="card">
-                <div class="clbl">Originale</div>
-                <div class="cbody">
-                    <img id="origImg" style="display:none;">
-                    <video id="origVideo" controls style="display:none; max-width:100%;"></video>
-                    <div id="origDoc" style="display:none; padding:20px; color:#ccc; max-height:300px; overflow-y:auto;"></div>
+                <div class="card-header">
+                    <span>📄 Originale</span>
+                    <span id="fileInfo" style="font-size:10px;"></span>
+                </div>
+                <div class="card-body">
+                    <img id="origImg" class="hidden">
+                    <video id="origVideo" controls class="hidden"></video>
+                    <div id="origDoc" class="hidden" style="padding:20px; color:#ccc; max-height:300px; overflow-y:auto;"></div>
                 </div>
             </div>
             <div class="card">
-                <div class="clbl">Anteprima Dark</div>
-                <div class="cbody">
-                    <canvas id="destCanvas" style="display:none;"></canvas>
-                    <video id="destVideo" controls style="display:none; max-width:100%;"></video>
-                    <div id="destDoc" style="display:none; padding:20px; color:#ccc; max-height:300px; overflow-y:auto; filter:invert(1) hue-rotate(180deg);"></div>
+                <div class="card-header">
+                    <span>🌙 Anteprima Dark</span>
+                    <span id="conversionStatus" style="font-size:10px; color:#4ade80;"></span>
+                </div>
+                <div class="card-body">
+                    <canvas id="destCanvas" class="hidden"></canvas>
+                    <video id="destVideo" controls class="hidden"></video>
+                    <div id="destDoc" class="hidden" style="padding:20px; color:#ccc; max-height:300px; overflow-y:auto; filter:invert(1) hue-rotate(180deg);"></div>
+                    <div id="processingOverlay" class="video-overlay hidden">
+                        <div style="text-align:center;">
+                            <div class="spinner"></div>
+                            <p style="margin-top:12px; font-size:13px; color:#ccc;" id="processingText">Elaborazione...</p>
+                        </div>
+                    </div>
                 </div>
             </div>
         </div>
         
-        <div class="progress" id="progressContainer" style="display:none;">
-            <div class="progress-bar" id="progressBar"></div>
+        <div class="progress-container hidden" id="progressContainer">
+            <div class="progress-fill" id="progressFill"></div>
+        </div>
+        <div class="time-estimate hidden" id="timeEstimate"></div>
+        
+        <div class="controls">
+            <button class="btn" id="dlBtn" disabled>
+                ⬇️ Scarica Versione Dark
+            </button>
+            <button class="btn btn-secondary hidden" id="cancelBtn">
+                ✕ Annulla
+            </button>
         </div>
         
-        <button class="btn" id="dlBtn" disabled>Scarica Versione Dark</button>
-        <p id="status" class="st">Pronto</p>
+        <div class="status-bar" id="status">Pronto</div>
     </div>
 </div>
 
-<!-- Librerie caricate da CDN con fallback -->
-<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.6.0/mammoth.browser.min.js"></script>
-
 <script>
     // ==================== CONFIGURAZIONE ====================
-    // Imposta publicPath manualmente per evitare l'errore
-    if (typeof __webpack_public_path__ !== 'undefined') {
-        __webpack_public_path__ = window.location.origin + '/';
-    }
-    
-    // Override per dynamic imports
-    window.publicPath = window.location.origin + '/Dynamic-Dark-Converter/';
+    const MAX_VIDEO_DURATION = 60; // secondi massimi per conversione
+    const TARGET_FPS = 15; // fps per la conversione (riduce il tempo)
     
     // ==================== ELEMENTI DOM ====================
     const fileInput = document.getElementById('fileInput');
@@ -576,263 +597,419 @@ if(window.location.protocol==='file:'){
     const destCanvas = document.getElementById('destCanvas');
     const destVideo = document.getElementById('destVideo');
     const destDoc = document.getElementById('destDoc');
+    const processingOverlay = document.getElementById('processingOverlay');
+    const processingText = document.getElementById('processingText');
     const dlBtn = document.getElementById('dlBtn');
+    const cancelBtn = document.getElementById('cancelBtn');
     const status = document.getElementById('status');
     const previewArea = document.getElementById('previewArea');
-    const progressBar = document.getElementById('progressBar');
+    const progressFill = document.getElementById('progressFill');
     const progressContainer = document.getElementById('progressContainer');
+    const timeEstimate = document.getElementById('timeEstimate');
+    const fileInfo = document.getElementById('fileInfo');
+    const conversionStatus = document.getElementById('conversionStatus');
     const ctx = destCanvas.getContext('2d');
     
     let currentFile = null;
     let processedBlob = null;
-    let currentType = null; // 'image', 'video', 'pdf', 'docx'
-    
-    // ==================== PDF.JS SETUP ====================
-    if (typeof window.pdfjsLib !== 'undefined') {
-        window.pdfjsLib.GlobalWorkerOptions.workerSrc = 
-            'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
-    }
+    let currentType = null;
+    let isProcessing = false;
+    let cancelRequested = false;
     
     // ==================== FILE HANDLING ====================
-    fileInput.addEventListener('change', function(e) {
-        const file = e.target.files[0];
-        if (!file) return;
-        currentFile = file;
-        handleFile(file);
+    fileInput.addEventListener('change', e => {
+        if (e.target.files[0]) handleFile(e.target.files[0]);
     });
     
     function handleFile(file) {
-        status.textContent = "Elaborazione in corso...";
-        status.classList.remove('err');
-        dlBtn.disabled = true;
-        progressContainer.style.display = 'none';
+        if (isProcessing) {
+            if (!confirm('Conversione in corso. Annullare?')) return;
+            cancelRequested = true;
+        }
         
-        // Reset display
-        [origImg, origVideo, origDoc, destCanvas, destVideo, destDoc].forEach(el => {
-            if (el) el.style.display = 'none';
+        currentFile = file;
+        processedBlob = null;
+        cancelRequested = false;
+        isProcessing = false;
+        
+        // Reset UI
+        [origImg, origVideo, origDoc, destCanvas, destVideo, destDoc, processingOverlay].forEach(el => {
+            if (el) el.classList.add('hidden');
         });
+        progressContainer.classList.add('hidden');
+        timeEstimate.classList.add('hidden');
+        dlBtn.disabled = true;
+        cancelBtn.classList.add('hidden');
+        conversionStatus.textContent = '';
+        status.textContent = 'Elaborazione...';
+        status.classList.remove('error');
         
         const url = URL.createObjectURL(file);
-        previewArea.style.display = 'block';
+        previewArea.classList.remove('hidden');
+        fileInfo.textContent = `${(file.size / 1024 / 1024).toFixed(1)}MB`;
         
         if (file.type.startsWith('image/')) {
             currentType = 'image';
-            origImg.style.display = 'block';
-            destCanvas.style.display = 'block';
-            origImg.src = url;
-            origImg.onload = () => { processImage(); URL.revokeObjectURL(url); };
-            origImg.onerror = () => showError('Errore nel caricamento immagine');
-        } 
-        else if (file.type.startsWith('video/')) {
+            processImage(url, file);
+        } else if (file.type.startsWith('video/')) {
             currentType = 'video';
-            origVideo.style.display = 'block';
-            destVideo.style.display = 'block';
-            origVideo.src = url;
-            origVideo.onloadedmetadata = () => { processVideo(); URL.revokeObjectURL(url); };
-            origVideo.onerror = () => showError('Errore nel caricamento video');
-        } 
-        else if (file.name.endsWith('.pdf')) {
+            processVideo(url, file);
+        } else if (file.name.endsWith('.pdf')) {
             currentType = 'pdf';
-            origDoc.style.display = 'block';
-            destDoc.style.display = 'block';
-            processPDF(file);
-        } 
-        else if (file.name.endsWith('.docx')) {
+            processDocument(file, 'pdf');
+        } else if (file.name.endsWith('.docx')) {
             currentType = 'docx';
-            origDoc.style.display = 'block';
-            destDoc.style.display = 'block';
-            processDOCX(file);
-        } 
-        else {
+            processDocument(file, 'docx');
+        } else {
             showError('Formato non supportato');
-            previewArea.style.display = 'none';
+            previewArea.classList.add('hidden');
         }
     }
     
     // ==================== IMMAGINI ====================
-    function processImage() {
-        destCanvas.width = origImg.naturalWidth;
-        destCanvas.height = origImg.naturalHeight;
+    function processImage(url, file) {
+        origImg.classList.remove('hidden');
+        destCanvas.classList.remove('hidden');
+        origImg.src = url;
         
-        ctx.filter = 'none';
-        ctx.drawImage(origImg, 0, 0);
-        ctx.filter = 'invert(1) hue-rotate(180deg) brightness(0.9) contrast(1.1)';
-        ctx.drawImage(destCanvas, 0, 0);
-        ctx.filter = 'none';
+        origImg.onload = () => {
+            URL.revokeObjectURL(url);
+            
+            destCanvas.width = origImg.naturalWidth;
+            destCanvas.height = origImg.naturalHeight;
+            
+            ctx.filter = 'none';
+            ctx.drawImage(origImg, 0, 0);
+            ctx.filter = 'invert(1) hue-rotate(180deg) brightness(0.9) contrast(1.1)';
+            ctx.drawImage(destCanvas, 0, 0);
+            ctx.filter = 'none';
+            
+            destCanvas.toBlob(blob => {
+                processedBlob = blob;
+                dlBtn.disabled = false;
+                conversionStatus.textContent = '✓ Pronto';
+                status.textContent = `✅ Immagine convertita (${destCanvas.width}x${destCanvas.height})`;
+            }, 'image/png', 1.0);
+        };
         
-        destCanvas.toBlob((blob) => {
-            processedBlob = blob;
-            dlBtn.disabled = false;
-            status.textContent = "✅ Conversione immagine completata";
-        }, 'image/png');
+        origImg.onerror = () => showError('Errore caricamento immagine');
     }
     
-    // ==================== VIDEO ====================
-    function processVideo() {
-        // Anteprima con filtro CSS
-        destVideo.src = origVideo.src;
-        destVideo.style.filter = 'invert(1) hue-rotate(180deg) brightness(0.9) contrast(1.1)';
-        destVideo.load();
+    // ==================== VIDEO - APPROCCIO OTTIMIZZATO ====================
+    function processVideo(url, file) {
+        origVideo.classList.remove('hidden');
+        destVideo.classList.remove('hidden');
         
-        // Per il download video, usiamo MediaRecorder con canvas
-        progressContainer.style.display = 'block';
-        status.textContent = "Preparazione conversione video...";
+        origVideo.src = url;
+        
+        origVideo.onloadedmetadata = () => {
+            const duration = origVideo.duration;
+            
+            // Controllo durata
+            if (duration > MAX_VIDEO_DURATION) {
+                showError(`Video troppo lungo (${Math.round(duration)}s). Massimo ${MAX_VIDEO_DURATION}s.`);
+                return;
+            }
+            
+            fileInfo.textContent += ` • ${Math.round(duration)}s • ${origVideo.videoWidth}x${origVideo.videoHeight}`;
+            
+            // Mostra anteprima con filtro CSS (immediato)
+            destVideo.src = url;
+            destVideo.style.filter = 'invert(1) hue-rotate(180deg) brightness(0.9) contrast(1.1)';
+            destVideo.load();
+            
+            // Stima tempo
+            const estimatedFrames = Math.ceil(duration * TARGET_FPS);
+            const estimatedSeconds = Math.ceil(estimatedFrames * 0.08); // ~80ms per frame
+            const estimatedMinutes = Math.ceil(estimatedSeconds / 60);
+            
+            conversionStatus.textContent = `Stima: ~${estimatedMinutes}min`;
+            dlBtn.disabled = false;
+            dlBtn.textContent = '⬇️ Converti e scarica video';
+            status.textContent = `Anteprima pronta. Clicca "Converti e scarica" per elaborare.`;
+            
+            URL.revokeObjectURL(url);
+        };
+        
+        origVideo.onerror = () => showError('Errore caricamento video');
+    }
+    
+    async function convertVideo() {
+        if (isProcessing) return;
+        isProcessing = true;
+        cancelRequested = false;
+        
+        dlBtn.classList.add('hidden');
+        cancelBtn.classList.remove('hidden');
+        processingOverlay.classList.remove('hidden');
+        progressContainer.classList.remove('hidden');
+        timeEstimate.classList.remove('hidden');
+        conversionStatus.textContent = 'Elaborazione...';
+        
+        const duration = origVideo.duration;
+        const totalFrames = Math.ceil(duration * TARGET_FPS);
+        const frameInterval = 1 / TARGET_FPS;
         
         const canvas = document.createElement('canvas');
+        canvas.width = origVideo.videoWidth || 640;
+        canvas.height = origVideo.videoHeight || 360;
         const ctx2 = canvas.getContext('2d');
         
-        origVideo.currentTime = 0;
-        origVideo.play();
+        const chunks = [];
+        const stream = canvas.captureStream(TARGET_FPS);
         
-        const stream = canvas.captureStream(30);
+        // Usa codec più efficiente se disponibile
+        let mimeType = 'video/webm;codecs=vp9';
+        if (!MediaRecorder.isTypeSupported(mimeType)) {
+            mimeType = 'video/webm;codecs=vp8';
+            if (!MediaRecorder.isTypeSupported(mimeType)) {
+                mimeType = 'video/webm';
+            }
+        }
+        
         const mediaRecorder = new MediaRecorder(stream, {
-            mimeType: 'video/webm; codecs=vp9'
+            mimeType: mimeType,
+            videoBitsPerSecond: 2500000 // 2.5 Mbps
         });
         
-        const chunks = [];
-        mediaRecorder.ondataavailable = e => chunks.push(e.data);
+        mediaRecorder.ondataavailable = e => {
+            if (e.data.size > 0) chunks.push(e.data);
+        };
+        
         mediaRecorder.onstop = () => {
-            processedBlob = new Blob(chunks, { type: 'video/webm' });
+            processedBlob = new Blob(chunks, { type: mimeType });
+            const sizeMB = (processedBlob.size / 1024 / 1024).toFixed(1);
+            
+            dlBtn.textContent = '⬇️ Scarica Versione Dark';
+            dlBtn.classList.remove('hidden');
+            cancelBtn.classList.add('hidden');
+            processingOverlay.classList.add('hidden');
+            conversionStatus.textContent = `✓ ${sizeMB}MB`;
             dlBtn.disabled = false;
-            status.textContent = "✅ Conversione video completata";
-            progressContainer.style.display = 'none';
+            isProcessing = false;
+            
+            if (cancelRequested) {
+                status.textContent = '⚠️ Conversione annullata';
+                status.classList.add('error');
+            } else {
+                status.textContent = `✅ Video convertito (${sizeMB}MB)`;
+            }
         };
         
-        origVideo.onplay = () => {
-            mediaRecorder.start();
+        mediaRecorder.onerror = () => {
+            showError('Errore durante la registrazione video');
+            cleanup();
+        };
+        
+        // Avvia riproduzione e registrazione
+        origVideo.currentTime = 0;
+        origVideo.muted = true;
+        
+        try {
+            await origVideo.play();
+        } catch(e) {
+            // Riproduzione automatica bloccata
+            showError('Clicca sul video originale e poi riprova');
+            cleanup();
+            return;
+        }
+        
+        mediaRecorder.start();
+        
+        const startTime = Date.now();
+        let frameCount = 0;
+        
+        async function processFrame() {
+            if (cancelRequested || origVideo.ended || origVideo.paused) {
+                mediaRecorder.stop();
+                origVideo.pause();
+                return;
+            }
             
-            function drawFrame() {
-                if (origVideo.paused || origVideo.ended) {
-                    mediaRecorder.stop();
-                    origVideo.pause();
-                    return;
+            // Disegna frame con filtro dark
+            ctx2.filter = 'invert(1) hue-rotate(180deg) brightness(0.9) contrast(1.1)';
+            ctx2.drawImage(origVideo, 0, 0, canvas.width, canvas.height);
+            ctx2.filter = 'none';
+            
+            frameCount++;
+            
+            // Aggiorna progresso
+            const progress = Math.min((origVideo.currentTime / duration) * 100, 100);
+            progressFill.style.width = progress + '%';
+            
+            // Calcola tempo rimanente
+            const elapsed = (Date.now() - startTime) / 1000;
+            const framesPerSec = frameCount / elapsed;
+            const remainingFrames = totalFrames - frameCount;
+            const remainingSec = Math.max(0, Math.ceil(remainingFrames / framesPerSec));
+            const remainingMin = Math.floor(remainingSec / 60);
+            const remainingSecMod = remainingSec % 60;
+            
+            processingText.textContent = `Elaborazione ${Math.round(progress)}%`;
+            timeEstimate.textContent = `Ancora ~${remainingMin}m ${remainingSecMod}s • ${Math.round(framesPerSec)} fps`;
+            
+            // Avanza al frame successivo
+            origVideo.currentTime = Math.min(frameCount * frameInterval, duration);
+            
+            // Usa requestAnimationFrame per timing più preciso
+            if (!cancelRequested && !origVideo.ended) {
+                requestAnimationFrame(processFrame);
+            } else {
+                mediaRecorder.stop();
+                origVideo.pause();
+            }
+        }
+        
+        requestAnimationFrame(processFrame);
+    }
+    
+    function cleanup() {
+        isProcessing = false;
+        dlBtn.classList.remove('hidden');
+        dlBtn.textContent = '⬇️ Scarica Versione Dark';
+        cancelBtn.classList.add('hidden');
+        processingOverlay.classList.add('hidden');
+        progressContainer.classList.add('hidden');
+        timeEstimate.classList.add('hidden');
+    }
+    
+    // ==================== DOCUMENTI ====================
+    async function processDocument(file, type) {
+        origDoc.classList.remove('hidden');
+        destDoc.classList.remove('hidden');
+        processingOverlay.classList.remove('hidden');
+        processingText.textContent = 'Elaborazione documento...';
+        
+        try {
+            const arrayBuffer = await file.arrayBuffer();
+            let content = '';
+            
+            if (type === 'pdf') {
+                if (typeof window.pdfjsLib === 'undefined') {
+                    throw new Error('Libreria PDF non caricata');
                 }
+                window.pdfjsLib.GlobalWorkerOptions.workerSrc = 
+                    'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
                 
-                canvas.width = origVideo.videoWidth;
-                canvas.height = origVideo.videoHeight;
-                ctx2.filter = 'invert(1) hue-rotate(180deg) brightness(0.9) contrast(1.1)';
-                ctx2.drawImage(origVideo, 0, 0, canvas.width, canvas.height);
+                const pdf = await window.pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+                const pages = [];
                 
-                const progress = (origVideo.currentTime / origVideo.duration) * 100;
-                progressBar.style.width = progress + '%';
+                for (let i = 1; i <= pdf.numPages; i++) {
+                    const page = await pdf.getPage(i);
+                    const textContent = await page.getTextContent();
+                    pages.push(textContent.items.map(item => item.str).join(' '));
+                }
+                content = pages.map((text, i) => 
+                    `<p style="margin:8px 0;"><strong>Pagina ${i+1}:</strong> ${text}</p>`
+                ).join('');
                 
-                requestAnimationFrame(drawFrame);
-            }
-            drawFrame();
-        };
-    }
-    
-    // ==================== PDF ====================
-    async function processPDF(file) {
-        if (typeof window.pdfjsLib === 'undefined') {
-            showError('Libreria PDF non disponibile');
-            return;
-        }
-        
-        status.textContent = "Elaborazione PDF...";
-        progressContainer.style.display = 'block';
-        progressBar.style.width = '10%';
-        
-        try {
-            const arrayBuffer = await file.arrayBuffer();
-            const pdf = await window.pdfjsLib.getDocument({ data: arrayBuffer }).promise;
-            
-            let fullHTML = '<div style="font-family:sans-serif;">';
-            
-            for (let i = 1; i <= pdf.numPages; i++) {
-                const page = await pdf.getPage(i);
-                const textContent = await page.getTextContent();
-                const text = textContent.items.map(item => item.str).join(' ');
-                fullHTML += `<p style="margin-bottom:10px;">${text}</p>`;
-                progressBar.style.width = ((i / pdf.numPages) * 100) + '%';
+            } else if (type === 'docx') {
+                if (typeof window.mammoth === 'undefined') {
+                    throw new Error('Libreria DOCX non caricata');
+                }
+                const result = await window.mammoth.convertToHtml({ arrayBuffer });
+                content = result.value;
             }
             
-            fullHTML += '</div>';
+            origDoc.innerHTML = content;
+            destDoc.innerHTML = content;
             
-            origDoc.innerHTML = fullHTML;
-            destDoc.innerHTML = fullHTML;
+            processedBlob = new Blob([`
+                <!DOCTYPE html>
+                <html><head><meta charset="UTF-8">
+                <style>body{background:#000;color:#fff;font-family:sans-serif;padding:20px;}
+                img,video{filter:invert(1) hue-rotate(180deg);max-width:100%;}</style>
+                </head><body>${content}</body></html>
+            `], { type: 'text/html' });
             
-            processedBlob = new Blob([fullHTML], { type: 'text/html' });
+            processingOverlay.classList.add('hidden');
             dlBtn.disabled = false;
-            status.textContent = "✅ Conversione PDF completata";
-            progressContainer.style.display = 'none';
+            conversionStatus.textContent = '✓ Pronto';
+            status.textContent = `✅ ${type.toUpperCase()} convertito`;
+            
         } catch (err) {
-            showError('Errore elaborazione PDF: ' + err.message);
-        }
-    }
-    
-    // ==================== DOCX ====================
-    async function processDOCX(file) {
-        if (typeof window.mammoth === 'undefined') {
-            showError('Libreria DOCX non disponibile');
-            return;
-        }
-        
-        status.textContent = "Elaborazione DOCX...";
-        progressContainer.style.display = 'block';
-        progressBar.style.width = '30%';
-        
-        try {
-            const arrayBuffer = await file.arrayBuffer();
-            const result = await window.mammoth.convertToHtml({ arrayBuffer });
-            
-            progressBar.style.width = '80%';
-            
-            origDoc.innerHTML = result.value;
-            destDoc.innerHTML = result.value;
-            
-            processedBlob = new Blob([result.value], { type: 'text/html' });
-            dlBtn.disabled = false;
-            status.textContent = "✅ Conversione DOCX completata";
-            progressContainer.style.display = 'none';
-        } catch (err) {
-            showError('Errore elaborazione DOCX: ' + err.message);
+            showError(`Errore ${type}: ${err.message}`);
         }
     }
     
     // ==================== DOWNLOAD ====================
     dlBtn.addEventListener('click', () => {
-        if (!processedBlob) {
-            showError('Nessun file elaborato');
+        if (currentType === 'video' && !processedBlob) {
+            // Avvia conversione video
+            dlBtn.textContent = '🔄 Conversione in corso...';
+            dlBtn.disabled = true;
+            convertVideo();
             return;
         }
         
-        let filename = 'dark-version';
-        if (currentType === 'image') filename += '.png';
-        else if (currentType === 'video') filename += '.webm';
-        else filename += '.html';
+        if (!processedBlob) {
+            showError('Nessun file da scaricare');
+            return;
+        }
         
-        const link = document.createElement('a');
-        link.download = filename;
-        link.href = URL.createObjectURL(processedBlob);
-        link.click();
-        URL.revokeObjectURL(link.href);
-        status.textContent = "✅ Download completato";
+        const extensions = {
+            image: 'png',
+            video: 'webm',
+            pdf: 'html',
+            docx: 'html'
+        };
+        
+        const filename = `dark-version.${extensions[currentType] || 'png'}`;
+        const url = URL.createObjectURL(processedBlob);
+        
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        
+        setTimeout(() => URL.revokeObjectURL(url), 1000);
+        status.textContent = `✅ Scaricato: ${filename}`;
+    });
+    
+    // ==================== ANNULLA ====================
+    cancelBtn.addEventListener('click', () => {
+        cancelRequested = true;
+        status.textContent = 'Annullamento...';
+        cancelBtn.disabled = true;
     });
     
     // ==================== UTILITY ====================
     function showError(msg) {
         status.textContent = msg;
-        status.classList.add('err');
+        status.classList.add('error');
+        conversionStatus.textContent = 'Errore';
+        cleanup();
     }
     
     // ==================== DRAG & DROP ====================
     const dropZone = document.getElementById('dropZone');
-    ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(name => {
-        dropZone.addEventListener(name, e => {
-            e.preventDefault();
-            e.stopPropagation();
-        });
+    dropZone.addEventListener('dragover', e => {
+        e.preventDefault();
+        dropZone.style.borderColor = '#4ade80';
+        dropZone.style.background = '#161616';
+    });
+    
+    dropZone.addEventListener('dragleave', () => {
+        dropZone.style.borderColor = '#2a2a2a';
+        dropZone.style.background = '#0d0d0d';
     });
     
     dropZone.addEventListener('drop', e => {
-        const dt = e.dataTransfer;
-        if (dt.files.length > 0) {
-            fileInput.files = dt.files;
-            fileInput.dispatchEvent(new Event('change'));
+        e.preventDefault();
+        dropZone.style.borderColor = '#2a2a2a';
+        dropZone.style.background = '#0d0d0d';
+        
+        if (e.dataTransfer.files.length > 0) {
+            handleFile(e.dataTransfer.files[0]);
         }
     });
 </script>
+
+<!-- Librerie CDN -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.6.0/mammoth.browser.min.js"></script>
 
 </body>
 </html>
