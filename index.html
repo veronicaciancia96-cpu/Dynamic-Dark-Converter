@@ -8,8 +8,8 @@
         * { box-sizing: border-box; margin: 0; padding: 0; }
         body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #0d0d0d; color: #e0e0e0; padding: 1.5rem 1rem; }
         .app { width: 100%; max-width: 900px; margin: 0 auto; background: #111; border-radius: 14px; padding: 1.5rem; border: 1px solid #1e1e1e; }
-        h1 { font-size: 22px; font-weight: 700; color: #f0f0f0; margin-bottom: 1.25rem; display: flex; align-items: center; gap: 10px; }
-        .drop { border: 1.5px dashed #2a2a2a; border-radius: 10px; padding: 2rem; text-align: center; cursor: pointer; background: #0d0d0d; transition: .15s; display: block; margin-bottom: 1rem; }
+        h1 { font-size: 22px; font-weight: 700; color: #f0f0f0; margin-bottom: 1.25rem; }
+        .drop { border: 1.5px dashed #2a2a2a; border-radius: 10px; padding: 2rem; text-align: center; cursor: pointer; background: #0d0d0d; transition: .15s; margin-bottom: 1rem; }
         .drop:hover { border-color: #4ade80; background: #161616; }
         .drop p { font-size: 14px; color: #888; margin-top: 10px; }
         input[type=file] { display: none; }
@@ -19,24 +19,21 @@
         .card-header { font-size: 10px; font-weight: 700; color: #888; padding: 8px 12px; border-bottom: 1px solid #1e1e1e; text-transform: uppercase; letter-spacing: .05em; display: flex; justify-content: space-between; align-items: center; }
         .card-body { padding: 10px; background: #000; display: flex; align-items: center; justify-content: center; min-height: 200px; position: relative; }
         canvas, img, video { max-width: 100%; max-height: 400px; border-radius: 4px; }
-        .btn { display: inline-flex; align-items: center; justify-content: center; gap: 8px; padding: 12px 24px; font-size: 14px; font-weight: 600; cursor: pointer; border: none; border-radius: 8px; background: #4ade80; color: #06200d; transition: 0.2s; width: 100%; margin-top: 12px; }
+        .btn { display: block; width: 100%; padding: 12px; font-size: 14px; font-weight: 600; cursor: pointer; border: none; border-radius: 8px; background: #4ade80; color: #06200d; transition: 0.2s; margin-top: 8px; }
         .btn:hover:not(:disabled) { background: #22c55e; }
         .btn:disabled { opacity: 0.3; cursor: not-allowed; }
-        .btn-secondary { background: #1e1e1e; color: #e0e0e0; margin-top: 8px; }
-        .btn-secondary:hover:not(:disabled) { background: #2a2a2a; }
-        .btn-remove { background: #3a1010; color: #f87171; margin-top: 8px; }
+        .btn-remove { background: #3a1010; color: #f87171; }
         .btn-remove:hover:not(:disabled) { background: #4a1515; }
         .status-bar { font-size: 12px; color: #888; margin-top: 10px; text-align: center; min-height: 18px; }
         .error { color: #f87171; }
         .progress-container { width: 100%; height: 6px; background: #1e1e1e; border-radius: 3px; margin-top: 10px; overflow: hidden; }
-        .progress-fill { height: 100%; background: #4ade80; width: 0%; transition: width 0.3s; border-radius: 3px; }
+        .progress-fill { height: 100%; background: #4ade80; width: 0%; transition: width 0.1s; border-radius: 3px; }
         .time-estimate { font-size: 11px; color: #666; text-align: center; margin-top: 4px; }
         .hidden { display: none !important; }
-        .overlay { position: absolute; top: 0; left: 0; right: 0; bottom: 0; display: flex; align-items: center; justify-content: center; background: rgba(0,0,0,0.7); border-radius: 4px; z-index: 10; }
+        .overlay { position: absolute; top: 0; left: 0; right: 0; bottom: 0; display: flex; align-items: center; justify-content: center; background: rgba(0,0,0,0.8); border-radius: 4px; z-index: 10; }
         .spinner { width: 40px; height: 40px; border: 3px solid #1e1e1e; border-top-color: #4ade80; border-radius: 50%; animation: spin 0.8s linear infinite; }
         @keyframes spin { to { transform: rotate(360deg); } }
-        .controls { display: flex; flex-direction: column; gap: 8px; margin-top: 12px; }
-        .info-tag { display: inline-block; background: #1a2a1a; color: #4ade80; padding: 2px 8px; border-radius: 4px; font-size: 10px; margin-left: 6px; }
+        .video-wrapper { position: relative; width: 100%; }
     </style>
 
 <!-- STANDALONE INLINE LIBS -->
@@ -99,9 +96,9 @@ return i=this.parent.children.indexOf(this),removed=this.parent.children.splice(
     <h1>🎬 Dynamic Dark Converter</h1>
     
     <label class="drop" id="dropZone">
-        <input type="file" id="fileInput" accept="image/*,video/*,.pdf,.docx">
+        <input type="file" id="fileInput" accept="image/*,video/mp4,video/webm,video/quicktime,.pdf,.docx">
         <p>📁 Trascina un file o clicca per caricare</p>
-        <small style="color:#444">Immagini (PNG,JPG,WebP) • Video (MP4,WebM) • PDF • DOCX</small>
+        <small style="color:#444">Immagini (PNG,JPG,WebP) • Video (MP4,WebM,MOV) • PDF • DOCX</small>
     </label>
 
     <div id="previewArea" class="hidden">
@@ -111,9 +108,11 @@ return i=this.parent.children.indexOf(this),removed=this.parent.children.splice(
                     <span>📄 Originale</span>
                     <span id="fileInfo" style="font-size:10px;"></span>
                 </div>
-                <div class="card-body">
+                <div class="card-body" id="originalBody">
                     <img id="origImg" class="hidden" alt="Originale">
-                    <video id="origVideo" controls class="hidden" playsinline muted></video>
+                    <div class="video-wrapper hidden" id="origVideoWrapper">
+                        <video id="origVideo" controls playsinline style="max-width:100%;max-height:400px;"></video>
+                    </div>
                     <div id="origDoc" class="hidden" style="padding:20px;color:#ccc;max-height:300px;overflow-y:auto;width:100%;"></div>
                 </div>
             </div>
@@ -122,9 +121,11 @@ return i=this.parent.children.indexOf(this),removed=this.parent.children.splice(
                     <span>🌙 Dark Mode</span>
                     <span id="conversionStatus" style="font-size:10px;"></span>
                 </div>
-                <div class="card-body">
+                <div class="card-body" id="darkBody">
                     <canvas id="destCanvas" class="hidden"></canvas>
-                    <video id="destVideo" controls class="hidden" playsinline></video>
+                    <div class="video-wrapper hidden" id="destVideoWrapper">
+                        <video id="destVideo" controls playsinline style="max-width:100%;max-height:400px;filter:invert(1)hue-rotate(180deg)brightness(0.9)contrast(1.1);"></video>
+                    </div>
                     <div id="destDoc" class="hidden" style="padding:20px;color:#ccc;max-height:300px;overflow-y:auto;width:100%;filter:invert(1)hue-rotate(180deg);"></div>
                     <div id="processingOverlay" class="overlay hidden">
                         <div style="text-align:center;">
@@ -141,54 +142,96 @@ return i=this.parent.children.indexOf(this),removed=this.parent.children.splice(
         </div>
         <div class="time-estimate hidden" id="timeEstimate"></div>
         
-        <div class="controls">
-            <button class="btn" id="dlBtn" disabled>⬇️ Converti e scarica</button>
-            <button class="btn btn-remove hidden" id="cancelBtn">✕ Annulla conversione</button>
-            <button class="btn btn-secondary hidden" id="removeBtn">🗑️ Rimuovi file</button>
-        </div>
+        <button class="btn" id="dlBtn" disabled>⬇️ Converti e scarica</button>
+        <button class="btn btn-remove hidden" id="removeBtn">🗑️ Rimuovi file</button>
         
         <div class="status-bar" id="status">Pronto</div>
     </div>
 </div>
 
+<!-- Canvas nascosto per elaborazione video -->
+<canvas id="hiddenCanvas" style="display:none;"></canvas>
+
 <script>
-    // ==================== CONFIGURAZIONE ====================
-    const MAX_VIDEO_DURATION = 120;
-    const TARGET_FPS = 15;
-    
     // ==================== ELEMENTI DOM ====================
     const fileInput = document.getElementById('fileInput');
     const origImg = document.getElementById('origImg');
     const origVideo = document.getElementById('origVideo');
+    const origVideoWrapper = document.getElementById('origVideoWrapper');
     const origDoc = document.getElementById('origDoc');
     const destCanvas = document.getElementById('destCanvas');
     const destVideo = document.getElementById('destVideo');
+    const destVideoWrapper = document.getElementById('destVideoWrapper');
     const destDoc = document.getElementById('destDoc');
     const processingOverlay = document.getElementById('processingOverlay');
     const processingText = document.getElementById('processingText');
+    const hiddenCanvas = document.getElementById('hiddenCanvas');
     const dlBtn = document.getElementById('dlBtn');
-    const cancelBtn = document.getElementById('cancelBtn');
     const removeBtn = document.getElementById('removeBtn');
-    const status = document.getElementById('status');
+    const statusEl = document.getElementById('status');
     const previewArea = document.getElementById('previewArea');
     const progressFill = document.getElementById('progressFill');
     const progressContainer = document.getElementById('progressContainer');
     const timeEstimate = document.getElementById('timeEstimate');
     const fileInfo = document.getElementById('fileInfo');
     const conversionStatus = document.getElementById('conversionStatus');
+    
     const ctx = destCanvas.getContext('2d');
+    const hiddenCtx = hiddenCanvas.getContext('2d');
     
     let currentFile = null;
     let processedBlob = null;
     let currentType = null;
     let isProcessing = false;
-    let cancelRequested = false;
     let currentFileURL = null;
+    let conversionStartTime = 0;
     
     // ==================== PDF.JS SETUP ====================
     if (typeof window.pdfjsLib !== 'undefined') {
         window.pdfjsLib.GlobalWorkerOptions.workerSrc = 
             'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+    }
+    
+    // ==================== RESET ====================
+    function hideAll() {
+        [origImg, origVideoWrapper, origDoc, destCanvas, destVideoWrapper, destDoc, processingOverlay].forEach(el => {
+            if (el) el.classList.add('hidden');
+        });
+    }
+    
+    function resetAll() {
+        if (currentFileURL) {
+            URL.revokeObjectURL(currentFileURL);
+            currentFileURL = null;
+        }
+        if (origVideo.src) {
+            origVideo.pause();
+            origVideo.removeAttribute('src');
+            origVideo.load();
+        }
+        if (destVideo.src) {
+            destVideo.pause();
+            destVideo.removeAttribute('src');
+            destVideo.load();
+        }
+        
+        currentFile = null;
+        processedBlob = null;
+        currentType = null;
+        isProcessing = false;
+        
+        hideAll();
+        progressContainer.classList.add('hidden');
+        timeEstimate.classList.add('hidden');
+        removeBtn.classList.add('hidden');
+        previewArea.classList.add('hidden');
+        dlBtn.disabled = true;
+        dlBtn.textContent = '⬇️ Converti e scarica';
+        fileInput.value = '';
+        statusEl.textContent = 'Pronto';
+        statusEl.classList.remove('error');
+        conversionStatus.textContent = '';
+        fileInfo.textContent = '';
     }
     
     // ==================== FILE HANDLING ====================
@@ -199,98 +242,53 @@ return i=this.parent.children.indexOf(this),removed=this.parent.children.splice(
     function handleFile(file) {
         if (isProcessing) {
             if (!confirm('Conversione in corso. Annullare?')) return;
-            cancelRequested = true;
         }
         
-        // Pulizia URL precedente
-        if (currentFileURL) {
-            URL.revokeObjectURL(currentFileURL);
-            currentFileURL = null;
-        }
-        
+        resetAll();
         currentFile = file;
-        processedBlob = null;
-        cancelRequested = false;
-        isProcessing = false;
-        
-        // Reset UI
-        [origImg, origVideo, origDoc, destCanvas, destVideo, destDoc, processingOverlay].forEach(el => {
-            if (el) el.classList.add('hidden');
-        });
-        progressContainer.classList.add('hidden');
-        timeEstimate.classList.add('hidden');
-        cancelBtn.classList.add('hidden');
-        dlBtn.disabled = true;
-        dlBtn.textContent = '⬇️ Converti e scarica';
-        conversionStatus.textContent = '';
-        status.textContent = 'Elaborazione...';
-        status.classList.remove('error');
         
         const url = URL.createObjectURL(file);
         currentFileURL = url;
-        previewArea.classList.remove('hidden');
-        removeBtn.classList.remove('hidden');
         
         const sizeMB = (file.size / 1024 / 1024).toFixed(1);
         fileInfo.textContent = `${sizeMB}MB`;
         
+        previewArea.classList.remove('hidden');
+        removeBtn.classList.remove('hidden');
+        statusEl.textContent = 'Elaborazione...';
+        
         if (file.type.startsWith('image/')) {
             currentType = 'image';
+            hideAll();
+            origImg.classList.remove('hidden');
+            destCanvas.classList.remove('hidden');
             processImage(url);
-        } else if (file.type.startsWith('video/')) {
+        } else if (file.type.startsWith('video/') || file.name.toLowerCase().endsWith('.mov')) {
             currentType = 'video';
+            hideAll();
+            origVideoWrapper.classList.remove('hidden');
+            destVideoWrapper.classList.remove('hidden');
             processVideo(url);
         } else if (file.name.toLowerCase().endsWith('.pdf')) {
             currentType = 'pdf';
+            hideAll();
+            origDoc.classList.remove('hidden');
+            destDoc.classList.remove('hidden');
             processDocument(file, 'pdf');
         } else if (file.name.toLowerCase().endsWith('.docx')) {
             currentType = 'docx';
+            hideAll();
+            origDoc.classList.remove('hidden');
+            destDoc.classList.remove('hidden');
             processDocument(file, 'docx');
         } else {
-            showError('Formato non supportato');
+            showError('Formato non supportato. Usa: immagini, video MP4/WebM/MOV, PDF, DOCX');
             previewArea.classList.add('hidden');
         }
     }
     
-    function resetAll() {
-        if (currentFileURL) {
-            URL.revokeObjectURL(currentFileURL);
-            currentFileURL = null;
-        }
-        currentFile = null;
-        processedBlob = null;
-        currentType = null;
-        isProcessing = false;
-        cancelRequested = false;
-        
-        [origImg, origVideo, origDoc, destCanvas, destVideo, destDoc, processingOverlay,
-         progressContainer, timeEstimate, cancelBtn, removeBtn].forEach(el => {
-            if (el) el.classList.add('hidden');
-        });
-        
-        if (origVideo) {
-            origVideo.pause();
-            origVideo.src = '';
-        }
-        if (destVideo) {
-            destVideo.pause();
-            destVideo.src = '';
-        }
-        
-        previewArea.classList.add('hidden');
-        dlBtn.disabled = true;
-        dlBtn.textContent = '⬇️ Converti e scarica';
-        fileInput.value = '';
-        status.textContent = 'Pronto';
-        status.classList.remove('error');
-        conversionStatus.textContent = '';
-        fileInfo.textContent = '';
-    }
-    
     // ==================== IMMAGINI ====================
     function processImage(url) {
-        origImg.classList.remove('hidden');
-        destCanvas.classList.remove('hidden');
         processingOverlay.classList.remove('hidden');
         processingText.textContent = 'Elaborazione immagine...';
         origImg.src = url;
@@ -309,103 +307,86 @@ return i=this.parent.children.indexOf(this),removed=this.parent.children.splice(
                 processedBlob = blob;
                 processingOverlay.classList.add('hidden');
                 dlBtn.disabled = false;
-                dlBtn.textContent = '⬇️ Scarica immagine dark';
+                dlBtn.textContent = '⬇️ Scarica immagine dark (PNG)';
                 conversionStatus.textContent = '✓ Pronto';
-                status.textContent = `✅ Immagine convertita (${destCanvas.width}x${destCanvas.height})`;
+                statusEl.textContent = `✅ Immagine convertita (${destCanvas.width}x${destCanvas.height})`;
             }, 'image/png', 1.0);
         };
         
         origImg.onerror = () => {
             processingOverlay.classList.add('hidden');
-            showError('Errore caricamento immagine');
+            showError('Errore nel caricamento dell\'immagine');
         };
     }
     
-    // ==================== VIDEO ====================
+    // ==================== VIDEO - METODO VELOCE ====================
     function processVideo(url) {
-        origVideo.classList.remove('hidden');
-        destVideo.classList.remove('hidden');
-        processingOverlay.classList.remove('hidden');
-        processingText.textContent = 'Caricamento video...';
-        
         origVideo.src = url;
         origVideo.muted = true;
         origVideo.playsInline = true;
         
         origVideo.onloadedmetadata = () => {
             const duration = origVideo.duration;
-            
-            if (duration > MAX_VIDEO_DURATION) {
-                processingOverlay.classList.add('hidden');
-                showError(`Video troppo lungo (${Math.round(duration)}s). Massimo ${MAX_VIDEO_DURATION}s.`);
-                return;
-            }
-            
             const width = origVideo.videoWidth || 640;
             const height = origVideo.videoHeight || 360;
             
             fileInfo.textContent += ` • ${Math.round(duration)}s • ${width}x${height}`;
             
-            // Anteprima dark immediata con filtro CSS
+            // Anteprima dark immediata
             destVideo.src = url;
             destVideo.muted = true;
             destVideo.playsInline = true;
-            destVideo.style.filter = 'invert(1) hue-rotate(180deg) brightness(0.9) contrast(1.1)';
             destVideo.load();
             
-            // Stima tempo conversione
-            const totalFrames = Math.ceil(duration * TARGET_FPS);
-            const estimatedSeconds = Math.ceil(totalFrames * 0.1);
-            const estimatedMinutes = Math.ceil(estimatedSeconds / 60);
-            
-            processingOverlay.classList.add('hidden');
+            // Stima realistica: 1x tempo reale (il video viene processato mentre viene riprodotto)
+            conversionStatus.textContent = `⏱ ~${Math.round(duration)}s`;
             dlBtn.disabled = false;
             dlBtn.textContent = '⬇️ Converti e scarica video';
-            conversionStatus.textContent = `⏱ ~${estimatedMinutes}min`;
-            status.textContent = `Anteprima pronta • Clicca "Converti e scarica" per elaborare (${Math.round(duration)}s, stima ~${estimatedMinutes}min)`;
+            statusEl.textContent = `✅ Anteprima pronta • Durata: ${Math.round(duration)}s • Clicca "Converti e scarica" per elaborare`;
         };
         
         origVideo.onerror = () => {
-            processingOverlay.classList.add('hidden');
-            showError('Errore caricamento video. Verifica il formato.');
+            showError('Errore nel caricamento del video. Prova con un formato MP4 o WebM.');
         };
     }
     
     async function convertVideo() {
         if (isProcessing) return;
         isProcessing = true;
-        cancelRequested = false;
+        conversionStartTime = Date.now();
         
-        dlBtn.classList.add('hidden');
-        removeBtn.classList.add('hidden');
-        cancelBtn.classList.remove('hidden');
+        origVideo.pause();
+        destVideo.pause();
+        
         processingOverlay.classList.remove('hidden');
         progressContainer.classList.remove('hidden');
         timeEstimate.classList.remove('hidden');
+        dlBtn.disabled = true;
+        dlBtn.textContent = '🔄 Conversione in corso...';
+        removeBtn.disabled = true;
         
         const duration = origVideo.duration;
-        const totalFrames = Math.ceil(duration * TARGET_FPS);
-        const frameInterval = 1 / TARGET_FPS;
+        const width = origVideo.videoWidth || 640;
+        const height = origVideo.videoHeight || 360;
         
-        const canvas = document.createElement('canvas');
-        canvas.width = origVideo.videoWidth || 640;
-        canvas.height = origVideo.videoHeight || 360;
-        const ctx2 = canvas.getContext('2d');
+        // Configura canvas nascosto
+        hiddenCanvas.width = width;
+        hiddenCanvas.height = height;
         
-        const chunks = [];
-        const stream = canvas.captureStream(TARGET_FPS);
+        // Cattura stream dal canvas a 30fps
+        const fps = 30;
+        const stream = hiddenCanvas.captureStream(fps);
         
-        let mimeType = 'video/webm;codecs=vp9';
-        if (!MediaRecorder.isTypeSupported(mimeType)) {
-            mimeType = 'video/webm;codecs=vp8';
-            if (!MediaRecorder.isTypeSupported(mimeType)) {
-                mimeType = 'video/webm';
-            }
+        // Usa il miglior codec disponibile
+        let mimeType = 'video/webm;codecs=vp8';
+        if (MediaRecorder.isTypeSupported('video/webm;codecs=vp9')) {
+            mimeType = 'video/webm;codecs=vp9';
         }
         
+        const chunks = [];
         const mediaRecorder = new MediaRecorder(stream, {
             mimeType: mimeType,
-            videoBitsPerSecond: 2500000
+            videoBitsPerSecond: 3000000 // 3 Mbps
         });
         
         mediaRecorder.ondataavailable = e => {
@@ -415,112 +396,91 @@ return i=this.parent.children.indexOf(this),removed=this.parent.children.splice(
         mediaRecorder.onstop = () => {
             processedBlob = new Blob(chunks, { type: mimeType });
             const sizeMB = (processedBlob.size / 1024 / 1024).toFixed(1);
+            const elapsed = ((Date.now() - conversionStartTime) / 1000).toFixed(0);
             
             processingOverlay.classList.add('hidden');
             progressContainer.classList.add('hidden');
             timeEstimate.classList.add('hidden');
-            cancelBtn.classList.add('hidden');
-            removeBtn.classList.remove('hidden');
-            dlBtn.classList.remove('hidden');
             dlBtn.disabled = false;
-            dlBtn.textContent = '⬇️ Scarica video dark';
+            dlBtn.textContent = '⬇️ Scarica video dark (WebM)';
+            removeBtn.disabled = false;
             isProcessing = false;
             
-            if (cancelRequested) {
-                conversionStatus.textContent = 'Annullato';
-                status.textContent = '⚠️ Conversione annullata';
-                status.classList.add('error');
-                processedBlob = null;
-                dlBtn.disabled = true;
-            } else {
-                conversionStatus.textContent = `✓ ${sizeMB}MB`;
-                status.textContent = `✅ Video convertito (${sizeMB}MB)`;
-            }
+            conversionStatus.textContent = `✓ ${sizeMB}MB`;
+            statusEl.textContent = `✅ Video convertito in ${elapsed}s • ${sizeMB}MB`;
+            progressFill.style.width = '100%';
         };
         
-        mediaRecorder.onerror = () => {
-            showError('Errore durante la registrazione');
-            cleanupVideoConversion();
+        mediaRecorder.onerror = (e) => {
+            showError('Errore durante la registrazione: ' + (e.error?.message || 'sconosciuto'));
+            cleanupConversion();
         };
         
-        // Avvia riproduzione
+        // Avvia registrazione
+        mediaRecorder.start(100); // chunks ogni 100ms
+        
+        // Reset e riproduci il video originale
         origVideo.currentTime = 0;
         origVideo.muted = true;
+        origVideo.playbackRate = 1.0;
         
-        try {
-            await origVideo.play();
-        } catch(e) {
-            showError('Impossibile avviare la riproduzione. Clicca Play sul video originale e riprova.');
-            cleanupVideoConversion();
-            return;
-        }
-        
-        mediaRecorder.start();
-        
-        const startTime = Date.now();
-        let frameCount = 0;
-        
-        function processFrame() {
-            if (cancelRequested || origVideo.ended) {
+        // Funzione di rendering frame
+        function renderFrame() {
+            if (!isProcessing || origVideo.ended) {
                 mediaRecorder.stop();
                 origVideo.pause();
                 return;
             }
             
             try {
-                ctx2.filter = 'invert(1) hue-rotate(180deg) brightness(0.9) contrast(1.1)';
-                ctx2.drawImage(origVideo, 0, 0, canvas.width, canvas.height);
-                ctx2.filter = 'none';
+                // Applica filtro dark e disegna sul canvas nascosto
+                hiddenCtx.filter = 'invert(1) hue-rotate(180deg) brightness(0.9) contrast(1.1)';
+                hiddenCtx.drawImage(origVideo, 0, 0, width, height);
+                hiddenCtx.filter = 'none';
+                
+                // Aggiorna progresso
+                const progress = Math.min((origVideo.currentTime / duration) * 100, 100);
+                progressFill.style.width = progress + '%';
+                
+                // Stima tempo rimanente
+                const elapsed = (Date.now() - conversionStartTime) / 1000;
+                if (origVideo.currentTime > 0) {
+                    const estimatedTotal = elapsed / (origVideo.currentTime / duration);
+                    const remaining = Math.max(0, estimatedTotal - elapsed);
+                    timeEstimate.textContent = `Ancora ~${Math.round(remaining)}s`;
+                }
+                
+                processingText.textContent = `Elaborazione ${Math.round(progress)}%`;
+                
+                requestAnimationFrame(renderFrame);
             } catch(e) {
-                // Frame non disponibile, riprova
+                // Frame non disponibile, continua
+                requestAnimationFrame(renderFrame);
             }
-            
-            frameCount++;
-            
-            const progress = Math.min((origVideo.currentTime / duration) * 100, 100);
-            progressFill.style.width = progress + '%';
-            
-            const elapsed = (Date.now() - startTime) / 1000;
-            const fps = frameCount / Math.max(elapsed, 0.1);
-            const remainingFrames = totalFrames - frameCount;
-            const remainingSec = Math.max(0, Math.ceil(remainingFrames / Math.max(fps, 1)));
-            const remainingMin = Math.floor(remainingSec / 60);
-            const remSec = remainingSec % 60;
-            
-            processingText.textContent = `Elaborazione ${Math.round(progress)}%`;
-            timeEstimate.textContent = `Ancora ~${remainingMin}m ${remSec}s • ${Math.round(fps)} fps`;
-            
-            origVideo.currentTime = Math.min(frameCount * frameInterval, duration - 0.01);
         }
         
-        // Interval loop per il processing
-        const intervalId = setInterval(() => {
-            if (cancelRequested || origVideo.ended) {
-                clearInterval(intervalId);
-                mediaRecorder.stop();
-                origVideo.pause();
-                return;
-            }
-            processFrame();
-        }, Math.round(frameInterval * 1000));
+        // Inizia riproduzione e rendering
+        try {
+            await origVideo.play();
+            requestAnimationFrame(renderFrame);
+        } catch(e) {
+            showError('Impossibile avviare la riproduzione. Clicca sul video e riprova.');
+            cleanupConversion();
+        }
     }
     
-    function cleanupVideoConversion() {
+    function cleanupConversion() {
         isProcessing = false;
         processingOverlay.classList.add('hidden');
         progressContainer.classList.add('hidden');
         timeEstimate.classList.add('hidden');
-        cancelBtn.classList.add('hidden');
-        removeBtn.classList.remove('hidden');
-        dlBtn.classList.remove('hidden');
         dlBtn.disabled = false;
         dlBtn.textContent = '⬇️ Converti e scarica video';
+        removeBtn.disabled = false;
     }
     
     // ==================== DOCUMENTI ====================
     async function processDocument(file, type) {
-        origDoc.classList.remove('hidden');
-        destDoc.classList.remove('hidden');
         processingOverlay.classList.remove('hidden');
         processingText.textContent = `Elaborazione ${type.toUpperCase()}...`;
         
@@ -530,11 +490,10 @@ return i=this.parent.children.indexOf(this),removed=this.parent.children.splice(
             
             if (type === 'pdf') {
                 if (typeof window.pdfjsLib === 'undefined') {
-                    throw new Error('Libreria PDF non caricata');
+                    throw new Error('Libreria PDF non disponibile. Ricarica la pagina con connessione internet.');
                 }
                 const pdf = await window.pdfjsLib.getDocument({ data: arrayBuffer }).promise;
                 const pages = [];
-                
                 for (let i = 1; i <= pdf.numPages; i++) {
                     const page = await pdf.getPage(i);
                     const textContent = await page.getTextContent();
@@ -543,10 +502,9 @@ return i=this.parent.children.indexOf(this),removed=this.parent.children.splice(
                 content = pages.map((text, i) => 
                     `<p style="margin:8px 0;line-height:1.6;"><strong>Pagina ${i+1}:</strong> ${text}</p>`
                 ).join('');
-                
             } else if (type === 'docx') {
                 if (typeof window.mammoth === 'undefined') {
-                    throw new Error('Libreria DOCX non caricata');
+                    throw new Error('Libreria DOCX non disponibile. Ricarica la pagina con connessione internet.');
                 }
                 const result = await window.mammoth.convertToHtml({ arrayBuffer });
                 content = result.value;
@@ -554,15 +512,13 @@ return i=this.parent.children.indexOf(this),removed=this.parent.children.splice(
             
             origDoc.innerHTML = content;
             destDoc.innerHTML = content;
-            
             processedBlob = new Blob([content], { type: 'text/html' });
             
             processingOverlay.classList.add('hidden');
             dlBtn.disabled = false;
-            dlBtn.textContent = '⬇️ Scarica documento dark';
+            dlBtn.textContent = '⬇️ Scarica documento dark (HTML)';
             conversionStatus.textContent = '✓ Pronto';
-            status.textContent = `✅ ${type.toUpperCase()} convertito`;
-            
+            statusEl.textContent = `✅ ${type.toUpperCase()} convertito`;
         } catch (err) {
             processingOverlay.classList.add('hidden');
             showError(`Errore ${type}: ${err.message}`);
@@ -572,8 +528,6 @@ return i=this.parent.children.indexOf(this),removed=this.parent.children.splice(
     // ==================== DOWNLOAD ====================
     dlBtn.addEventListener('click', () => {
         if (currentType === 'video' && !processedBlob) {
-            dlBtn.textContent = '🔄 Conversione in corso...';
-            dlBtn.disabled = true;
             convertVideo();
             return;
         }
@@ -583,13 +537,7 @@ return i=this.parent.children.indexOf(this),removed=this.parent.children.splice(
             return;
         }
         
-        const extensions = {
-            image: 'png',
-            video: 'webm',
-            pdf: 'html',
-            docx: 'html'
-        };
-        
+        const extensions = { image: 'png', video: 'webm', pdf: 'html', docx: 'html' };
         const filename = `dark-version.${extensions[currentType] || 'png'}`;
         const url = URL.createObjectURL(processedBlob);
         
@@ -599,31 +547,26 @@ return i=this.parent.children.indexOf(this),removed=this.parent.children.splice(
         document.body.appendChild(a);
         a.click();
         document.body.removeChild(a);
-        
         setTimeout(() => URL.revokeObjectURL(url), 1000);
-        status.textContent = `✅ Scaricato: ${filename}`;
+        
+        statusEl.textContent = `✅ Scaricato: ${filename}`;
     });
     
-    // ==================== ANNULLA / RIMUOVI ====================
-    cancelBtn.addEventListener('click', () => {
-        cancelRequested = true;
-        cancelBtn.disabled = true;
-        status.textContent = 'Annullamento in corso...';
-    });
-    
+    // ==================== RIMUOVI ====================
     removeBtn.addEventListener('click', () => {
-        if (isProcessing) {
-            cancelRequested = true;
-        }
+        isProcessing = false;
         resetAll();
-        status.textContent = 'File rimosso. Carica un nuovo file.';
+        statusEl.textContent = 'File rimosso. Carica un nuovo file.';
     });
     
     // ==================== UTILITY ====================
     function showError(msg) {
-        status.textContent = '❌ ' + msg;
-        status.classList.add('error');
+        statusEl.textContent = '❌ ' + msg;
+        statusEl.classList.add('error');
         conversionStatus.textContent = 'Errore';
+        isProcessing = false;
+        dlBtn.disabled = true;
+        removeBtn.disabled = false;
     }
     
     // ==================== DRAG & DROP ====================
@@ -648,7 +591,6 @@ return i=this.parent.children.indexOf(this),removed=this.parent.children.splice(
         e.stopPropagation();
         dropZone.style.borderColor = '#2a2a2a';
         dropZone.style.background = '#0d0d0d';
-        
         if (e.dataTransfer.files.length > 0) {
             handleFile(e.dataTransfer.files[0]);
         }
@@ -668,7 +610,7 @@ return i=this.parent.children.indexOf(this),removed=this.parent.children.splice(
     });
 </script>
 
-<!-- Librerie CDN (saranno inlineate dal build script) -->
+<!-- Librerie CDN -->
 <!-- CDN library inlined -->
 <!-- CDN library inlined -->
 
