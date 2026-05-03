@@ -1102,9 +1102,7 @@ async function getFFmpeg(){
 document.getElementById('vid-btn').addEventListener('click',async function(){
   if(!vURL)return;
   var btn=this;
-  // Keep display RAF running during conversion: stopping it makes Chrome
-  // throttle the page (and therefore the video decoder) by ~9x.
-  btn.disabled=true;setSt('vid',sp('Avvio conversione...'));setBar('vid',0);
+  btn.disabled=true;stopRaf();setSt('vid',sp('Avvio conversione...'));setBar('vid',0);
 
   var fk=Object.keys(FILTERS).find(function(k){return FILTERS[k]===F;})||'night';
   var vfStr=FFVF[fk];
@@ -1261,6 +1259,12 @@ async function convertVideoFallback(btn){
   }else{
     frameIv=setInterval(drawFrame,33);
   }
+  // Keep-alive RAF: doesn't read from video, just signals Chrome the page is
+  // active so the video decoder isn't throttled. Cancelled by stopRec via rafId.
+  rafId=requestAnimationFrame(function ka(){
+    if(recStopped)return;
+    rafId=requestAnimationFrame(ka);
+  });
 }
 function clearVid(){stopRaf();if(vURL){URL.revokeObjectURL(vURL);vURL=null;}va.pause();va.removeAttribute('src');va.load();F=FILTERS.night;contentMixed=false;vidExt='webm';document.getElementById('vid-wrap').style.display='none';document.getElementById('vid-ai').style.display='none';document.getElementById('vid-btn').disabled=true;document.getElementById('vid-st').textContent='';document.getElementById('vid-fill').style.width='0';vidBlob=null;vidChunks=[];showDrop();}
 </script>
