@@ -1060,10 +1060,12 @@ var _ffmpegInst=null;
 async function getFFmpeg(){
   if(_ffmpegInst)return _ffmpegInst;
 
-  // ffmpeg.wasm requires SharedArrayBuffer + COOP/COEP headers.
-  // file:// URLs and most static hosts don't have these headers → fail fast.
-  if(typeof SharedArrayBuffer==='undefined'||window.location.protocol==='file:'){
-    throw new Error('Ambiente non supportato — verrà usato il metodo alternativo');
+  // ffmpeg.wasm requires SharedArrayBuffer + cross-origin isolation (COOP/COEP).
+  // file:// URLs and most static hosts (incl. GitHub Pages) don't satisfy this → fail fast.
+  if(window.location.protocol==='file:') throw new Error('file:// non supportato');
+  if(typeof SharedArrayBuffer==='undefined') throw new Error('SharedArrayBuffer non disponibile');
+  if(typeof crossOriginIsolated!=='undefined' && crossOriginIsolated===false){
+    throw new Error('Pagina non cross-origin isolated (manca COOP/COEP) — uso fallback');
   }
 
   setSt('vid',sp('Caricamento ffmpeg (~30MB, solo la prima volta)...'));
@@ -1076,10 +1078,16 @@ async function getFFmpeg(){
 
   // Load ffmpeg.js UMD if not already present
   if(!window.FFmpegWASM){
-    var ffLibURL=isLocal
-      ? window.location.origin+'/ffmpeg.js'
-      : 'https://unpkg.com/@ffmpeg/ffmpeg@0.12.10/dist/umd/ffmpeg.js';
-    /* ffmpeg.js already inline */;
+    var ffLibBase=isLocal
+      ? window.location.origin+'/'
+      : 'https://unpkg.com/@ffmpeg/ffmpeg@0.12.10/dist/umd/';
+    var ffLibURL=ffLibBase+'ffmpeg.js';
+    // Set webpack public path BEFORE loading the UMD bundle.
+    // ffmpeg.js's webpack runtime tries to derive publicPath from
+    // document.currentScript.src — when loaded dynamically that throws
+    // "Automatic publicPath is not supported in this browser".
+    try{ window.__webpack_public_path__=ffLibBase; }catch(e){}
+    try{ /* ffmpeg.js already inline */; }catch(e){ throw new Error('Errore caricamento ffmpeg.js: '+(e&&e.message||e)); }
   }
   if(!window.FFmpegWASM||!window.FFmpegWASM.FFmpeg)throw new Error('ffmpeg.js non caricato');
 
@@ -1173,94 +1181,140 @@ async function convertVideoFallback(btn){
   var srcW=va.videoWidth,srcH=va.videoHeight;
   if(!srcW||!srcH){setSt('vid','Dimensioni non disponibili.',true);btn.disabled=false;startRaf();return;}
   if(typeof MediaRecorder==='undefined'){setSt('vid','⚠️ Conversione non disponibile in questo browser.',true);btn.disabled=false;startRaf();return;}
-  var MAX_W=1280,scale=Math.min(1,MAX_W/srcW),w=Math.round(srcW*scale),h=Math.round(srcH*scale);
+
+  // Keep original resolution (only downscale if absurdly large) so format/quality match the source
+  var MAX_W=1920,scale=Math.min(1,MAX_W/srcW),w=Math.round(srcW*scale),h=Math.round(srcH*scale);
   var ec=document.createElement('canvas');ec.width=w;ec.height=h;var ex=ec.getContext('2d');
+
+  // Pick the best mime: prefer the same container as the original; fall back to webm
   var prefMp4=(vidExt==='mp4'||vidExt==='mov'||vidExt==='m4v');
-  var types=prefMp4?['video/mp4;codecs=avc1,mp4a.40.2','video/mp4','video/webm;codecs=vp9','video/webm;codecs=vp8','video/webm']:['video/webm;codecs=vp9','video/webm;codecs=vp8','video/webm'];
+  var types=prefMp4
+    ? ['video/mp4;codecs=avc1.42E01E,mp4a.40.2','video/mp4;codecs=h264,aac','video/mp4','video/webm;codecs=vp9,opus','video/webm;codecs=vp8,opus','video/webm']
+    : ['video/webm;codecs=vp9,opus','video/webm;codecs=vp8,opus','video/webm','video/mp4;codecs=avc1.42E01E,mp4a.40.2','video/mp4'];
   var mime='';
   for(var ti=0;ti<types.length;ti++){try{if(MediaRecorder.isTypeSupported(types[ti])){mime=types[ti];break;}}catch(e){}}
   if(!mime){setSt('vid','Nessun formato supportato.',true);btn.disabled=false;startRaf();return;}
 
-  // 1. Unmute and seek to start BEFORE capturing any stream
   var dur=va.duration;
-  va.muted=false;va.volume=1.0;va.playbackRate=1.0;va.currentTime=0;
-  await new Promise(function(r){var fn=function(){va.removeEventListener('seeked',fn);r();};va.addEventListener('seeked',fn);});
   if(!dur||isNaN(dur)||dur<=0){setSt('vid','Durata non disponibile.',true);btn.disabled=false;startRaf();return;}
 
-  // 2. Capture canvas video stream (filtered)
-  var canvasStream;
-  try{canvasStream=ec.captureStream?ec.captureStream(30):ec.mozCaptureStream(30);}catch(e){setSt('vid','Errore stream canvas.',true);btn.disabled=false;startRaf();return;}
+  // Unmute and seek to start. Use a timeout so we don't hang forever if 'seeked' never fires
+  // (some browsers don't emit it when currentTime is already at the requested value).
+  va.muted=false;va.volume=1.0;va.playbackRate=1.0;
+  await new Promise(function(r){
+    var done=false;
+    var fn=function(){if(done)return;done=true;va.removeEventListener('seeked',fn);clearTimeout(to);r();};
+    va.addEventListener('seeked',fn);
+    var to=setTimeout(fn,1500);
+    try{
+      if(Math.abs(va.currentTime)>0.05) va.currentTime=0;
+      else { va.currentTime=0; setTimeout(fn,150); } // already at 0, just nudge
+    }catch(e){fn();}
+  });
 
-  // 3. Capture audio from video element via captureStream() — must run AFTER unmute
+  // Capture audio from the video element FIRST (it must be unmuted at capture time).
+  // Use a single captureStream() call and reuse the audio tracks.
   var audioTracks=[];
   try{
     var vaCaptureFn=va.captureStream||va.mozCaptureStream;
     if(vaCaptureFn){
       var vaStream=vaCaptureFn.call(va);
       audioTracks=vaStream.getAudioTracks();
-      console.log('[DDC] Audio tracks captured:',audioTracks.length,audioTracks.map(function(t){return {label:t.label,enabled:t.enabled,muted:t.muted,readyState:t.readyState};}));
+      console.log('[DDC] Audio tracks captured:',audioTracks.length);
     }else{
       console.warn('[DDC] captureStream not available on video element');
     }
   }catch(e){console.warn('[DDC] captureStream error:',e);}
 
-  // 4. Build combined stream: filtered video from canvas + original audio
+  // Capture filtered canvas video stream
+  var canvasStream;
+  try{canvasStream=ec.captureStream?ec.captureStream(30):ec.mozCaptureStream(30);}catch(e){setSt('vid','Errore stream canvas.',true);btn.disabled=false;startRaf();return;}
+
   var videoTracks=canvasStream.getVideoTracks();
   var combined=new MediaStream([].concat(videoTracks,audioTracks));
-  console.log('[DDC] Combined stream tracks:',combined.getTracks().length,'(',videoTracks.length,'video +',audioTracks.length,'audio)');
+  console.log('[DDC] Combined stream:',videoTracks.length,'video +',audioTracks.length,'audio');
 
-  // Choose appropriate audio bitrate; only set if we actually have audio
-  var recOpts={mimeType:mime,videoBitsPerSecond:2500000};
-  if(audioTracks.length>0)recOpts.audioBitsPerSecond=128000;
+  // Higher bitrate to keep visual quality close to the original
+  var recOpts={mimeType:mime,videoBitsPerSecond:5000000};
+  if(audioTracks.length>0)recOpts.audioBitsPerSecond=192000;
   var rec;try{rec=new MediaRecorder(combined,recOpts);}catch(e){setSt('vid','Errore MediaRecorder: '+e.message,true);btn.disabled=false;startRaf();return;}
   vidChunks=[];
   rec.ondataavailable=function(e){if(e.data&&e.data.size>0)vidChunks.push(e.data);};
-  var flt=F,startTs=null,frameIv=null;
+
+  var flt=F,startTs=null,frameIv=null,watchdog=null,etaIv=null;
   var recStopped=false;
+  function cleanupTimers(){
+    if(frameIv){clearInterval(frameIv);frameIv=null;}
+    if(watchdog){clearInterval(watchdog);watchdog=null;}
+    if(etaIv){clearInterval(etaIv);etaIv=null;}
+  }
   function stopRec(){
     if(recStopped)return;recStopped=true;
-    if(frameIv){clearInterval(frameIv);frameIv=null;}
-    va.pause();if(rec.state!=='inactive')rec.stop();
+    cleanupTimers();
+    try{va.pause();}catch(e){}
+    try{if(rec.state!=='inactive')rec.stop();}catch(e){}
   }
-  var etaIv=setInterval(function(){
+
+  etaIv=setInterval(function(){
     if(startTs===null)return;
     var el=(Date.now()-startTs)/1000,pct=dur?va.currentTime/dur:0;
-    if(pct>0.01)setSt('vid',sp('Elaborazione '+Math.round(pct*100)+'% — ancora ~'+Math.round(el/pct-el)+'s'));
+    if(pct>0.01)setSt('vid',sp('Elaborazione '+Math.round(pct*100)+'% — ancora ~'+Math.max(0,Math.round(el/pct-el))+'s'));
+    else setSt('vid',sp('Elaborazione in corso...'));
   },1000);
+
   rec.onstop=function(){
-    clearInterval(etaIv);
+    cleanupTimers();
     if(!vidChunks.length){setSt('vid','Errore: nessun frame.',true);btn.disabled=false;startRaf();return;}
     var outExt=mime.indexOf('mp4')>=0?'mp4':'webm';
     vidBlob=new Blob(vidChunks,{type:mime});vidExt=outExt;
     var blobURL=URL.createObjectURL(vidBlob),a=document.createElement('a');
     a.href=blobURL;a.download=darkName(vidBaseName,outExt);
-    document.body.appendChild(a);a.click();document.body.removeChild(a);
-    setTimeout(function(){URL.revokeObjectURL(blobURL);},30000);
+    document.body.appendChild(a);a.click();
+    setTimeout(function(){try{document.body.removeChild(a);}catch(e){}URL.revokeObjectURL(blobURL);},60000);
     var mb=(vidBlob.size/1024/1024).toFixed(1);
     setBar('vid',100);setSt('vid','✓ Scaricato — '+mb+' MB'+(audioTracks.length?' (con audio)':' (senza audio)'));
     btn.disabled=false;btn.textContent='Converti e scarica video';startRaf();
   };
-  rec.onerror=function(e){clearInterval(etaIv);setSt('vid','Errore: '+(e.error?e.error.message:e),true);btn.disabled=false;startRaf();};
+  rec.onerror=function(e){cleanupTimers();setSt('vid','Errore: '+(e.error?e.error.message:e),true);btn.disabled=false;startRaf();};
   va.onended=function(){stopRec();};
 
-  // Start recording, then begin playback. va.play() must follow rec.start so first frames are captured
-  rec.start(100);startTs=Date.now();
-  try{await va.play();}catch(e){clearInterval(etaIv);setSt('vid','Errore avvio video: '+e.message,true);btn.disabled=false;startRaf();return;}
+  // Pre-paint the first frame so the recorder doesn't open with a blank canvas
+  try{
+    if(ctxFilterOK){ex.filter=flt;ex.drawImage(va,0,0,w,h);ex.filter='none';}
+    else{applyFilterPixels(ex,va,w,h,flt);}
+  }catch(e){}
+
+  rec.start(250);startTs=Date.now();
+  try{await va.play();}catch(e){stopRec();setSt('vid','Errore avvio video: '+e.message,true);btn.disabled=false;startRaf();return;}
 
   function drawFrame(){
     if(recStopped)return;
-    if(va.ended||va.currentTime>=dur-0.15){stopRec();return;}
+    if(va.ended||(dur&&va.currentTime>=dur-0.1)){stopRec();return;}
     if(ctxFilterOK){ex.filter=flt;ex.drawImage(va,0,0,w,h);ex.filter='none';}
     else{applyFilterPixels(ex,va,w,h,flt);}
     setBar('vid',Math.round((va.currentTime/dur)*100));
   }
   if(va.requestVideoFrameCallback){
-    (function onVFC(){if(recStopped)return;drawFrame();va.requestVideoFrameCallback(onVFC);})();
-  }else{
-    frameIv=setInterval(drawFrame,33);
+    (function onVFC(){if(recStopped)return;drawFrame();if(!recStopped)va.requestVideoFrameCallback(onVFC);})();
   }
-  // Keep-alive RAF: doesn't read from video, just signals Chrome the page is
-  // active so the video decoder isn't throttled. Cancelled by stopRec via rafId.
+  // Always run a backup interval — VFC stops firing at end-of-stream, and we
+  // need *something* that detects EOS reliably.
+  frameIv=setInterval(function(){
+    if(recStopped)return;
+    if(va.ended||(dur&&va.currentTime>=dur-0.1)){stopRec();return;}
+    if(!va.requestVideoFrameCallback) drawFrame();
+  },200);
+
+  // Watchdog: if currentTime hasn't advanced for ~6s, give up so we don't hang.
+  var lastT=-1,stallCount=0;
+  watchdog=setInterval(function(){
+    if(recStopped)return;
+    var ct=va.currentTime;
+    if(ct<=lastT+0.05) stallCount++; else stallCount=0;
+    lastT=ct;
+    if(stallCount>=12){console.warn('[DDC] Stall detected, stopping');stopRec();}
+  },500);
+
   rafId=requestAnimationFrame(function ka(){
     if(recStopped)return;
     rafId=requestAnimationFrame(ka);
