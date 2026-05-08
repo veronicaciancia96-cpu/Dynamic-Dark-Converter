@@ -606,55 +606,39 @@ var _ffmpegInst=null;
 async function getFFmpeg(){
   if(_ffmpegInst)return _ffmpegInst;
 
-  // Su file:// il browser blocca il caricamento di risorse esterne (CORS)
-  // e SharedArrayBuffer non è disponibile — salta ffmpeg immediatamente
+  // ffmpeg.wasm v0.11 (createFFmpeg API) works WITHOUT SharedArrayBuffer/COOP/COEP.
+  // Compatible with GitHub Pages, Safari, and file:// after the service worker reloads.
+  // Falls back to MediaRecorder only if the network request itself fails.
+
   if(window.location.protocol==='file:'){
     throw new Error('file:// — usa MediaRecorder');
   }
 
-  // ffmpeg.wasm requires SharedArrayBuffer + cross-origin isolation (COOP/COEP).
-  // Not available on GitHub Pages or Safari without special headers → fail fast.
-  if(typeof SharedArrayBuffer==='undefined'){
-    throw new Error('SharedArrayBuffer non disponibile');
+  setSt('vid',sp('Caricamento ffmpeg (~30 MB, solo la prima volta)...'));
+
+  // Load ffmpeg v0.11 UMD bundle from CDN (self-registering, no webpack publicPath issue)
+  if(typeof window.FFmpeg === 'undefined'){
+    try{
+      await loadJS('https://unpkg.com/@ffmpeg/ffmpeg@0.11.6/dist/ffmpeg.min.js');
+    }catch(e){
+      throw new Error('Errore caricamento ffmpeg.js: '+(e&&e.message||e));
+    }
   }
-  if(typeof crossOriginIsolated!=='undefined' && crossOriginIsolated===false){
-    throw new Error('Pagina non cross-origin isolated (manca COOP/COEP)');
+  if(typeof window.FFmpeg==='undefined'||typeof window.FFmpeg.createFFmpeg==='undefined'){
+    throw new Error('ffmpeg.js v0.11 non caricato');
   }
 
-  setSt('vid',sp('Caricamento ffmpeg (~30MB, solo la prima volta)...'));
-
-  // Determine base URL: local server or CDN
-  var isLocal=(window.location.hostname==='localhost'||window.location.hostname==='127.0.0.1');
-  var baseCore=isLocal
-    ? window.location.origin
-    : 'https://unpkg.com/@ffmpeg/core@0.12.6/dist/umd';
-
-  // Load ffmpeg.js UMD if not already present
-  if(!window.FFmpegWASM){
-    var ffLibBase=isLocal
-      ? window.location.origin+'/'
-      : 'https://unpkg.com/@ffmpeg/ffmpeg@0.12.10/dist/umd/';
-    var ffLibURL=ffLibBase+'ffmpeg.js';
-    // Set webpack public path BEFORE loading the UMD bundle. ffmpeg.js's
-    // webpack runtime tries to derive publicPath from document.currentScript.src —
-    // when loaded dynamically that throws "Automatic publicPath is not supported in this browser".
-    try{ window.__webpack_public_path__=ffLibBase; }catch(e){}
-    try{ await loadJS(ffLibURL); }catch(e){ throw new Error('Errore caricamento ffmpeg.js: '+(e&&e.message||e)); }
-  }
-  if(!window.FFmpegWASM||!window.FFmpegWASM.FFmpeg)throw new Error('ffmpeg.js non caricato');
-
-  var ff=new window.FFmpegWASM.FFmpeg();
-  ff.on('progress',function(p){
-    var pct=Math.round((p.progress||0)*100);
-    setSt('vid',sp('Conversione '+pct+'%'));
-    setBar('vid',pct);
+  var ff=window.FFmpeg.createFFmpeg({
+    corePath:'https://unpkg.com/@ffmpeg/core@0.11.0/dist/ffmpeg-core.js',
+    log:false,
+    progress:function(p){
+      var pct=Math.round((p.ratio||0)*100);
+      setSt('vid',sp('Conversione '+pct+'%'));
+      setBar('vid',pct);
+    }
   });
-  ff.on('log',function(){});
 
-  await ff.load({
-    coreURL:baseCore+'/ffmpeg-core.js',
-    wasmURL:baseCore+'/ffmpeg-core.wasm'
-  });
+  await ff.load();
   _ffmpegInst=ff;
   return ff;
 }
@@ -670,24 +654,19 @@ document.getElementById('vid-btn').addEventListener('click',async function(){
   try{
     var ff=await getFFmpeg();
 
-    // Legge il video direttamente dal File object (funziona su file:// e http://)
+    // ffmpeg v0.11 API: fetchFile() + FS.writeFile() + run() + FS.readFile()
     setSt('vid',sp('Lettura video...'));
-    var buf=await new Promise(function(resolve,reject){
-      var reader=new FileReader();
-      reader.onload=function(e){resolve(new Uint8Array(e.target.result));};
-      reader.onerror=reject;
-      reader.readAsArrayBuffer(vidFile||new Blob());
-    });
     var ext=(vidOrigExt||'mp4').toLowerCase();
-    // Preserve original container when reasonable. mov/m4v map to mp4; mkv→mp4 too (browsers can play it).
+    // Preserve original container. mov/m4v → mp4; mkv → mp4 (browsers can play it).
     var outExt=(ext==='webm')?'webm':'mp4';
     var outMime=(outExt==='webm')?'video/webm':'video/mp4';
     var inName='input.'+ext;
     var outName='output.'+outExt;
 
-    await ff.writeFile(inName,buf);
+    var fileData=await window.FFmpeg.fetchFile(vidFile||vURL);
+    ff.FS('writeFile',inName,fileData);
 
-    // Build ffmpeg command — keep original resolution (no forced downscale)
+    // Build ffmpeg v0.11 run() args (flat array, no leading '-y' needed as separate arg)
     var args=['-i',inName];
     if(vfStr){ args.push('-vf',vfStr); }
     if(outExt==='webm'){
@@ -696,30 +675,30 @@ document.getElementById('vid-btn').addEventListener('click',async function(){
         '-b:v','0','-crf','32',
         '-c:a','libopus',
         '-b:a','128k',
-        '-y',outName
+        outName
       );
     } else {
       args.push(
         '-c:v','libx264',
-        '-crf','22',          // higher quality than before
+        '-crf','22',
         '-preset','fast',
         '-c:a','aac',
         '-b:a','192k',
         '-movflags','+faststart',
-        '-y',outName
+        outName
       );
     }
 
     setSt('vid',sp('Conversione in corso...'));
-    await ff.exec(args);
+    await ff.run.apply(ff,args);
 
-    var outData=await ff.readFile(outName);
+    var outData=ff.FS('readFile',outName);
     vidBlob=new Blob([outData.buffer],{type:outMime});
     vidExt=outExt;
 
     // Cleanup FS
-    try{await ff.deleteFile(inName);}catch(e){}
-    try{await ff.deleteFile(outName);}catch(e){}
+    try{ff.FS('unlink',inName);}catch(e){}
+    try{ff.FS('unlink',outName);}catch(e){}
 
     var blobURL=URL.createObjectURL(vidBlob);
     var a=document.createElement('a');
