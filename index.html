@@ -1,18 +1,6 @@
 <!DOCTYPE html>
 <html lang="it">
 <head>
-  <script>
-(function(){
-  if (!('serviceWorker' in navigator)) return;
-  try {
-    navigator.serviceWorker.getRegistrations().then(function(regs){
-      regs.forEach(function(r){
-        try { r.unregister(); } catch(e){}
-      });
-    }).catch(function(){});
-  } catch(e){}
-})();
-</script>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1.0">
 <title>Dynamic Dark Converter</title>
@@ -75,10 +63,6 @@ input[type=file]{display:none}
 @keyframes spin{to{transform:rotate(360deg)}}
 @media(max-width:560px){.split,.vidcols,.docpages{grid-template-columns:1fr}.docdiv{display:none}}
 </style>
-<!-- ffmpeg.wasm UMD bundle. DEVE essere caricato dal parser come script SINCRONO
-     (no defer/async): il bundle webpack-ato risolve publicPath via
-     document.currentScript, che è null sia per script con appendChild dinamico
-     sia per script defer/async eseguiti dopo il parsing. Sincrono = OK. -->
 <script src="https://unpkg.com/@ffmpeg/ffmpeg@0.11.6/dist/ffmpeg.min.js"></script>
 </head>
 <body>
@@ -592,9 +576,9 @@ var _ffmpegInst=null;
 async function getFFmpeg(){
   if(_ffmpegInst)return _ffmpegInst;
 
-  // ffmpeg.wasm v0.11 + core-st (single-thread) gira SENZA SharedArrayBuffer/COOP/COEP.
-  // Compatibile con GitHub Pages, Safari e qualunque origine HTTPS senza service worker.
-  // Fallback su MediaRecorder solo se la fetch del bundle fallisce davvero (es. offline).
+  // ffmpeg.wasm v0.11 (createFFmpeg API) works WITHOUT SharedArrayBuffer/COOP/COEP.
+  // Compatible with GitHub Pages, Safari, and file:// after the service worker reloads.
+  // Falls back to MediaRecorder only if the network request itself fails.
 
   if(window.location.protocol==='file:'){
     throw new Error('file:// — usa MediaRecorder');
@@ -602,23 +586,20 @@ async function getFFmpeg(){
 
   setSt('vid',sp('Caricamento ffmpeg (~30 MB, solo la prima volta)...'));
 
-  // ffmpeg.min.js è caricato come <script defer> statico nell'HEAD.
-  // Qui aspettiamo solo che window.FFmpeg sia disponibile (max ~10s).
-  // NON caricare via appendChild: il bundle webpack legge document.currentScript
-  // a init time e fallirebbe con "Automatic publicPath is not supported".
+  // Load ffmpeg v0.11 UMD bundle from CDN (self-registering, no webpack publicPath issue)
   if(typeof window.FFmpeg === 'undefined'){
-    var waited=0;
-    while(typeof window.FFmpeg === 'undefined' && waited < 10000){
-      await new Promise(function(r){setTimeout(r,100);});
-      waited += 100;
+    try{
+      /* ffmpeg.min.js caricato staticamente in <head> - nessun loadJS necessario */;
+    }catch(e){
+      throw new Error('Errore caricamento ffmpeg.js: '+(e&&e.message||e));
     }
   }
   if(typeof window.FFmpeg==='undefined'||typeof window.FFmpeg.createFFmpeg==='undefined'){
-    throw new Error('ffmpeg.js v0.11 non caricato (rete bloccata o CDN irraggiungibile)');
+    throw new Error('ffmpeg.js v0.11 non caricato');
   }
 
   var ff=window.FFmpeg.createFFmpeg({
-    corePath:'https://unpkg.com/@ffmpeg/core-st@0.11.1/dist/ffmpeg-core.js',
+    corePath:'https://unpkg.com/@ffmpeg/core@0.11.0/dist/ffmpeg-core.js',
     log:false,
     progress:function(p){
       var pct=Math.round((p.ratio||0)*100);
