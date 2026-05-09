@@ -597,9 +597,13 @@ async function getFFmpeg(){
 
   setSt('vid',sp('Caricamento ffmpeg (~30 MB, solo la prima volta)...'));
 
-  // Load ffmpeg v0.11 UMD bundle from CDN (self-registering, no webpack publicPath issue)
+  // Load ffmpeg v0.11 UMD bundle from CDN.
+  // IMPORTANTE: il bundle è webpack-ato e tenta di dedurre publicPath da
+  // document.currentScript: con loadJS() dinamico fallisce ("Automatic publicPath
+  // is not supported in this browser"). Lo impostiamo a mano PRIMA del fetch.
   if(typeof window.FFmpeg === 'undefined'){
     try{
+      window.__webpack_public_path__='https://unpkg.com/@ffmpeg/ffmpeg@0.11.6/dist/';
       await loadJS('https://unpkg.com/@ffmpeg/ffmpeg@0.11.6/dist/ffmpeg.min.js');
     }catch(e){
       throw new Error('Errore caricamento ffmpeg.js: '+(e&&e.message||e));
