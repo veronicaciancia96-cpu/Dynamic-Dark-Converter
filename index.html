@@ -1,6 +1,37 @@
 <!DOCTYPE html>
 <html lang="it">
 <head>
+  <script>
+(function(){
+  if (window.crossOriginIsolated) { return; } // già a posto
+  if (!('serviceWorker' in navigator) || !window.isSecureContext) { return; }
+  try {
+    navigator.serviceWorker.register('coi-serviceworker.js', { scope: './' })
+      .then(function(){ return navigator.serviceWorker.ready; })
+      .then(function(reg){
+        if (!navigator.serviceWorker.controller) {
+          // SW attivo ma questa pagina non è ancora controllata dal SW:
+          // serve un reload perché il fetch della pagina passi dal SW
+          // e riceva gli header COOP/COEP.
+          if (sessionStorage.getItem('ddc-coi-reload') === '1') {
+            console.warn('[DDC] gia\' ricaricato una volta, COI ancora off');
+            return;
+          }
+          sessionStorage.setItem('ddc-coi-reload', '1');
+          location.reload();
+        } else {
+          sessionStorage.removeItem('ddc-coi-reload');
+          if (!window.crossOriginIsolated) {
+            // SW vecchio o senza fetch handler — re-register pulito
+            console.warn('[DDC] SW controlla ma COI off, re-register');
+            reg.unregister().then(function(){ location.reload(); });
+          }
+        }
+      })
+      .catch(function(e){ console.error('[DDC] COI SW failed:', e); });
+  } catch (e) { console.error('[DDC] COI bootstrap error:', e); }
+})();
+</script>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1.0">
 <title>Dynamic Dark Converter</title>
