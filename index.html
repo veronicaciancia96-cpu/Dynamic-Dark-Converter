@@ -75,11 +75,11 @@ input[type=file]{display:none}
 @keyframes spin{to{transform:rotate(360deg)}}
 @media(max-width:560px){.split,.vidcols,.docpages{grid-template-columns:1fr}.docdiv{display:none}}
 </style>
-<!-- ffmpeg.wasm UMD bundle. DEVE essere caricato dal parser (script statico),
-     non con appendChild dinamico: il bundle webpack-ato risolve publicPath via
-     document.currentScript, che è null per script inseriti programmaticamente
-     → "Automatic publicPath is not supported in this browser". -->
-<script src="https://unpkg.com/@ffmpeg/ffmpeg@0.11.6/dist/ffmpeg.min.js" defer></script>
+<!-- ffmpeg.wasm UMD bundle. DEVE essere caricato dal parser come script SINCRONO
+     (no defer/async): il bundle webpack-ato risolve publicPath via
+     document.currentScript, che è null sia per script con appendChild dinamico
+     sia per script defer/async eseguiti dopo il parsing. Sincrono = OK. -->
+<script src="https://unpkg.com/@ffmpeg/ffmpeg@0.11.6/dist/ffmpeg.min.js"></script>
 </head>
 <body>
 <div class="app">
