@@ -3,33 +3,32 @@
 <head>
   <script>
 (function(){
-  if (window.crossOriginIsolated) { return; } // già a posto
+  // Già cross-origin isolated → nulla da fare (siamo gia' nel reload "buono")
+  if (window.crossOriginIsolated) { return; }
+  // Niente SW disponibile o contesto non sicuro → la pagina lavorera' senza
+  // ffmpeg (fallback MediaRecorder), nessun reload necessario.
   if (!('serviceWorker' in navigator) || !window.isSecureContext) { return; }
+
+  // Guard di sessione: dopo UN reload non riprovare, niente loop infiniti.
+  // Pulisci subito il flag: alla prossima sessione si riparte da zero.
+  if (sessionStorage.getItem('ddc-coi-reload') === '1') {
+    sessionStorage.removeItem('ddc-coi-reload');
+    console.warn('[DDC] reload gia\' tentato in questa sessione, COI ancora off — uso fallback');
+    return;
+  }
+
   try {
     navigator.serviceWorker.register('coi-serviceworker.js', { scope: './' })
       .then(function(){ return navigator.serviceWorker.ready; })
-      .then(function(reg){
-        if (!navigator.serviceWorker.controller) {
-          // SW attivo ma questa pagina non è ancora controllata dal SW:
-          // serve un reload perché il fetch della pagina passi dal SW
-          // e riceva gli header COOP/COEP.
-          if (sessionStorage.getItem('ddc-coi-reload') === '1') {
-            console.warn('[DDC] gia\' ricaricato una volta, COI ancora off');
-            return;
-          }
+      .then(function(){
+        // Se siamo ancora senza COI, facciamo UN reload, una sola volta.
+        if (!window.crossOriginIsolated) {
           sessionStorage.setItem('ddc-coi-reload', '1');
           location.reload();
-        } else {
-          sessionStorage.removeItem('ddc-coi-reload');
-          if (!window.crossOriginIsolated) {
-            // SW vecchio o senza fetch handler — re-register pulito
-            console.warn('[DDC] SW controlla ma COI off, re-register');
-            reg.unregister().then(function(){ location.reload(); });
-          }
         }
       })
-      .catch(function(e){ console.error('[DDC] COI SW failed:', e); });
-  } catch (e) { console.error('[DDC] COI bootstrap error:', e); }
+      .catch(function(e){ console.warn('[DDC] COI SW register failed:', e); });
+  } catch (e) { console.warn('[DDC] COI bootstrap error:', e); }
 })();
 </script>
 <meta charset="UTF-8">
