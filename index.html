@@ -63,7 +63,6 @@ input[type=file]{display:none}
 @keyframes spin{to{transform:rotate(360deg)}}
 @media(max-width:560px){.split,.vidcols,.docpages{grid-template-columns:1fr}.docdiv{display:none}}
 </style>
-<script src="https://unpkg.com/@ffmpeg/ffmpeg@0.11.6/dist/ffmpeg.min.js"></script>
 </head>
 <body>
 <div class="app">
@@ -576,39 +575,59 @@ var _ffmpegInst=null;
 async function getFFmpeg(){
   if(_ffmpegInst)return _ffmpegInst;
 
-  // ffmpeg.wasm v0.11 (createFFmpeg API) works WITHOUT SharedArrayBuffer/COOP/COEP.
-  // Compatible with GitHub Pages, Safari, and file:// after the service worker reloads.
-  // Falls back to MediaRecorder only if the network request itself fails.
-
+  // Su file:// il browser blocca il caricamento di risorse esterne (CORS)
+  // e SharedArrayBuffer non è disponibile — salta ffmpeg immediatamente
   if(window.location.protocol==='file:'){
     throw new Error('file:// — usa MediaRecorder');
   }
 
-  setSt('vid',sp('Caricamento ffmpeg (~30 MB, solo la prima volta)...'));
-
-  // Load ffmpeg v0.11 UMD bundle from CDN (self-registering, no webpack publicPath issue)
-  if(typeof window.FFmpeg === 'undefined'){
-    try{
-      /* ffmpeg.min.js caricato staticamente in <head> - nessun loadJS necessario */;
-    }catch(e){
-      throw new Error('Errore caricamento ffmpeg.js: '+(e&&e.message||e));
-    }
+  // ffmpeg.wasm requires SharedArrayBuffer + cross-origin isolation (COOP/COEP).
+  // Not available on GitHub Pages or Safari without special headers → fail fast.
+  if(typeof SharedArrayBuffer==='undefined'){
+    throw new Error('SharedArrayBuffer non disponibile');
   }
-  if(typeof window.FFmpeg==='undefined'||typeof window.FFmpeg.createFFmpeg==='undefined'){
-    throw new Error('ffmpeg.js v0.11 non caricato');
+  // Alcuni browser (Helium/Brave in incognito, Safari con privacy stretto) tengono
+  // SAB "definito" ma rifiutano l'istanziazione. Verifica reale prima di andare avanti.
+  try{ new SharedArrayBuffer(1); }
+  catch(_e){ throw new Error('SharedArrayBuffer non istanziabile (probabile finestra incognito o privacy avanzata)'); }
+  if(typeof crossOriginIsolated!=='undefined' && crossOriginIsolated===false){
+    throw new Error('Pagina non cross-origin isolated (manca COOP/COEP)');
   }
 
-  var ff=window.FFmpeg.createFFmpeg({
-    corePath:'https://unpkg.com/@ffmpeg/core@0.11.0/dist/ffmpeg-core.js',
-    log:false,
-    progress:function(p){
-      var pct=Math.round((p.ratio||0)*100);
-      setSt('vid',sp('Conversione '+pct+'%'));
-      setBar('vid',pct);
-    }
+  setSt('vid',sp('Caricamento ffmpeg (~30MB, solo la prima volta)...'));
+
+  // Determine base URL: local server or CDN
+  var isLocal=(window.location.hostname==='localhost'||window.location.hostname==='127.0.0.1');
+  var baseCore=isLocal
+    ? window.location.origin
+    : 'https://unpkg.com/@ffmpeg/core@0.12.6/dist/umd';
+
+  // Load ffmpeg.js UMD if not already present
+  if(!window.FFmpegWASM){
+    var ffLibBase=isLocal
+      ? window.location.origin+'/'
+      : 'https://unpkg.com/@ffmpeg/ffmpeg@0.12.10/dist/umd/';
+    var ffLibURL=ffLibBase+'ffmpeg.js';
+    // Set webpack public path BEFORE loading the UMD bundle. ffmpeg.js's
+    // webpack runtime tries to derive publicPath from document.currentScript.src —
+    // when loaded dynamically that throws "Automatic publicPath is not supported in this browser".
+    try{ window.__webpack_public_path__=ffLibBase; }catch(e){}
+    try{ await loadJS(ffLibURL); }catch(e){ throw new Error('Errore caricamento ffmpeg.js: '+(e&&e.message||e)); }
+  }
+  if(!window.FFmpegWASM||!window.FFmpegWASM.FFmpeg)throw new Error('ffmpeg.js non caricato');
+
+  var ff=new window.FFmpegWASM.FFmpeg();
+  ff.on('progress',function(p){
+    var pct=Math.round((p.progress||0)*100);
+    setSt('vid',sp('Conversione '+pct+'%'));
+    setBar('vid',pct);
   });
+  ff.on('log',function(){});
 
-  await ff.load();
+  await ff.load({
+    coreURL:baseCore+'/ffmpeg-core.js',
+    wasmURL:baseCore+'/ffmpeg-core.wasm'
+  });
   _ffmpegInst=ff;
   return ff;
 }
@@ -624,19 +643,24 @@ document.getElementById('vid-btn').addEventListener('click',async function(){
   try{
     var ff=await getFFmpeg();
 
-    // ffmpeg v0.11 API: fetchFile() + FS.writeFile() + run() + FS.readFile()
+    // Legge il video direttamente dal File object (funziona su file:// e http://)
     setSt('vid',sp('Lettura video...'));
+    var buf=await new Promise(function(resolve,reject){
+      var reader=new FileReader();
+      reader.onload=function(e){resolve(new Uint8Array(e.target.result));};
+      reader.onerror=reject;
+      reader.readAsArrayBuffer(vidFile||new Blob());
+    });
     var ext=(vidOrigExt||'mp4').toLowerCase();
-    // Preserve original container. mov/m4v → mp4; mkv → mp4 (browsers can play it).
+    // Preserve original container when reasonable. mov/m4v map to mp4; mkv→mp4 too (browsers can play it).
     var outExt=(ext==='webm')?'webm':'mp4';
     var outMime=(outExt==='webm')?'video/webm':'video/mp4';
     var inName='input.'+ext;
     var outName='output.'+outExt;
 
-    var fileData=await window.FFmpeg.fetchFile(vidFile||vURL);
-    ff.FS('writeFile',inName,fileData);
+    await ff.writeFile(inName,buf);
 
-    // Build ffmpeg v0.11 run() args (flat array, no leading '-y' needed as separate arg)
+    // Build ffmpeg command — keep original resolution (no forced downscale)
     var args=['-i',inName];
     if(vfStr){ args.push('-vf',vfStr); }
     if(outExt==='webm'){
@@ -645,30 +669,30 @@ document.getElementById('vid-btn').addEventListener('click',async function(){
         '-b:v','0','-crf','32',
         '-c:a','libopus',
         '-b:a','128k',
-        outName
+        '-y',outName
       );
     } else {
       args.push(
         '-c:v','libx264',
-        '-crf','22',
+        '-crf','22',          // higher quality than before
         '-preset','fast',
         '-c:a','aac',
         '-b:a','192k',
         '-movflags','+faststart',
-        outName
+        '-y',outName
       );
     }
 
     setSt('vid',sp('Conversione in corso...'));
-    await ff.run.apply(ff,args);
+    await ff.exec(args);
 
-    var outData=ff.FS('readFile',outName);
+    var outData=await ff.readFile(outName);
     vidBlob=new Blob([outData.buffer],{type:outMime});
     vidExt=outExt;
 
     // Cleanup FS
-    try{ff.FS('unlink',inName);}catch(e){}
-    try{ff.FS('unlink',outName);}catch(e){}
+    try{await ff.deleteFile(inName);}catch(e){}
+    try{await ff.deleteFile(outName);}catch(e){}
 
     var blobURL=URL.createObjectURL(vidBlob);
     var a=document.createElement('a');
@@ -708,9 +732,25 @@ async function convertVideoFallback(btn){
   // dichiarano 'video/mp4' come supportato ma poi non includono l'audio)
   var ext=(vidOrigExt||'').toLowerCase();
   var prefMp4=(ext==='mp4'||ext==='mov'||ext==='m4v');
-  var types=prefMp4
-    ? ['video/mp4;codecs=avc1.42E01E,mp4a.40.2','video/mp4;codecs=h264,aac','video/mp4','video/webm;codecs=vp9,opus','video/webm;codecs=vp8,opus','video/webm']
-    : ['video/webm;codecs=vp9,opus','video/webm;codecs=vp8,opus','video/webm','video/mp4;codecs=avc1.42E01E,mp4a.40.2','video/mp4'];
+  // Più varianti di codec MP4: Helium/Brave a volte rifiutano avc1.42E01E ma accettano
+  // High@Level 3 (avc1.64001E) o profili Main; alcuni accettano solo la stringa generica.
+  var mp4Codecs=[
+    'video/mp4;codecs="avc1.42E01E,mp4a.40.2"',
+    'video/mp4;codecs=avc1.42E01E,mp4a.40.2',
+    'video/mp4;codecs=avc1.640028,mp4a.40.2',
+    'video/mp4;codecs=avc1.64001E,mp4a.40.2',
+    'video/mp4;codecs=avc1.4D0034,mp4a.40.2',
+    'video/mp4;codecs=avc1,mp4a.40.2',
+    'video/mp4;codecs=avc1,mp4a',
+    'video/mp4;codecs=h264,aac',
+    'video/mp4'
+  ];
+  var webmCodecs=[
+    'video/webm;codecs=vp9,opus',
+    'video/webm;codecs=vp8,opus',
+    'video/webm'
+  ];
+  var types=prefMp4 ? mp4Codecs.concat(webmCodecs) : webmCodecs.concat(mp4Codecs);
   var mime='';
   for(var ti=0;ti<types.length;ti++){try{if(MediaRecorder.isTypeSupported(types[ti])){mime=types[ti];break;}}catch(e){}}
   if(!mime){setSt('vid','Nessun formato supportato.',true);btn.disabled=false;startRaf();return;}
