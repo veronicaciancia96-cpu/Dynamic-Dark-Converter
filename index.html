@@ -3,33 +3,14 @@
 <head>
   <script>
 (function(){
-  if (window.crossOriginIsolated) { return; } // già a posto
-  if (!('serviceWorker' in navigator) || !window.isSecureContext) { return; }
+  if (!('serviceWorker' in navigator)) return;
   try {
-    navigator.serviceWorker.register('coi-serviceworker.js', { scope: './' })
-      .then(function(){ return navigator.serviceWorker.ready; })
-      .then(function(reg){
-        if (!navigator.serviceWorker.controller) {
-          // SW attivo ma questa pagina non è ancora controllata dal SW:
-          // serve un reload perché il fetch della pagina passi dal SW
-          // e riceva gli header COOP/COEP.
-          if (sessionStorage.getItem('ddc-coi-reload') === '1') {
-            console.warn('[DDC] gia\' ricaricato una volta, COI ancora off');
-            return;
-          }
-          sessionStorage.setItem('ddc-coi-reload', '1');
-          location.reload();
-        } else {
-          sessionStorage.removeItem('ddc-coi-reload');
-          if (!window.crossOriginIsolated) {
-            // SW vecchio o senza fetch handler — re-register pulito
-            console.warn('[DDC] SW controlla ma COI off, re-register');
-            reg.unregister().then(function(){ location.reload(); });
-          }
-        }
-      })
-      .catch(function(e){ console.error('[DDC] COI SW failed:', e); });
-  } catch (e) { console.error('[DDC] COI bootstrap error:', e); }
+    navigator.serviceWorker.getRegistrations().then(function(regs){
+      regs.forEach(function(r){
+        try { r.unregister(); } catch(e){}
+      });
+    }).catch(function(){});
+  } catch(e){}
 })();
 </script>
 <meta charset="UTF-8">
@@ -606,9 +587,9 @@ var _ffmpegInst=null;
 async function getFFmpeg(){
   if(_ffmpegInst)return _ffmpegInst;
 
-  // ffmpeg.wasm v0.11 (createFFmpeg API) works WITHOUT SharedArrayBuffer/COOP/COEP.
-  // Compatible with GitHub Pages, Safari, and file:// after the service worker reloads.
-  // Falls back to MediaRecorder only if the network request itself fails.
+  // ffmpeg.wasm v0.11 + core-st (single-thread) gira SENZA SharedArrayBuffer/COOP/COEP.
+  // Compatibile con GitHub Pages, Safari e qualunque origine HTTPS senza service worker.
+  // Fallback su MediaRecorder solo se la fetch del bundle fallisce davvero (es. offline).
 
   if(window.location.protocol==='file:'){
     throw new Error('file:// — usa MediaRecorder');
@@ -629,7 +610,7 @@ async function getFFmpeg(){
   }
 
   var ff=window.FFmpeg.createFFmpeg({
-    corePath:'https://unpkg.com/@ffmpeg/core@0.11.0/dist/ffmpeg-core.js',
+    corePath:'https://unpkg.com/@ffmpeg/core-st@0.11.1/dist/ffmpeg-core.js',
     log:false,
     progress:function(p){
       var pct=Math.round((p.ratio||0)*100);
