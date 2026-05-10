@@ -750,9 +750,8 @@ async function convertVideoFallback(btn){
     var done=false;
     var fn=function(){if(done)return;done=true;cvid.removeEventListener('seeked',fn);clearTimeout(to);r();};
     cvid.addEventListener('seeked',fn);
-    var to=setTimeout(fn,1500);
+    var to=setTimeout(fn,3000); // timeout di sicurezza, senza il 200ms prematuro
     try{cvid.currentTime=0;}catch(e){fn();}
-    setTimeout(fn,200);
   });
 
   // Cattura audio: instrada il video tramite WebAudio in un MediaStreamDestination,
@@ -828,7 +827,7 @@ async function convertVideoFallback(btn){
   cvid.addEventListener('pause',onCvidPause);
 
   function cleanupTimers(){
-    if(frameIv){clearInterval(frameIv);frameIv=null;}
+    if(frameIv){cancelAnimationFrame(frameIv);frameIv=null;}
     if(watchdog){clearInterval(watchdog);watchdog=null;}
     if(etaIv){clearInterval(etaIv);etaIv=null;}
   }
@@ -884,25 +883,18 @@ async function convertVideoFallback(btn){
     setSt('vid','Errore avvio video: '+e.message,true);btn.disabled=false;startRaf();return;
   }
 
-  function drawFrame(){
+  // Disegna ogni frame tramite rAF: affidabile, non si blocca come rVFC
+  function rafLoop(){
     if(recStopped)return;
-    if(cvid.ended||(dur&&cvid.currentTime>=dur-0.1)){stopRec();return;}
-    try{ex.filter=flt;ex.drawImage(cvid,0,0,w,h);ex.filter='none';}catch(e){}
-    setBar('vid',Math.round((cvid.currentTime/dur)*100));
+    if(cvid.ended||(dur&&cvid.currentTime>=dur-0.05)){stopRec();return;}
+    // Disegna solo se il video ha dati decodificati (readyState >= HAVE_CURRENT_DATA)
+    if(cvid.readyState>=2){
+      try{ex.filter=flt;ex.drawImage(cvid,0,0,w,h);ex.filter='none';}catch(e){}
+      if(dur>0) setBar('vid',Math.round((cvid.currentTime/dur)*100));
+    }
+    frameIv=requestAnimationFrame(rafLoop);
   }
-  if(typeof cvid.requestVideoFrameCallback==='function'){
-    (function onVFrame(){
-      if(recStopped)return;
-      drawFrame();
-      if(!recStopped) cvid.requestVideoFrameCallback(onVFrame);
-    })();
-  }
-  // Backup interval — VFC smette di sparare a fine stream
-  frameIv=setInterval(function(){
-    if(recStopped)return;
-    if(cvid.ended||(dur&&cvid.currentTime>=dur-0.1)){stopRec();return;}
-    if(typeof cvid.requestVideoFrameCallback!=='function') drawFrame();
-  },200);
+  frameIv=requestAnimationFrame(rafLoop);
 
   // Watchdog: se currentTime non avanza per ~10s nonostante l'auto-resume, esci
   var lastT=-1,stallCount=0;
