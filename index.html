@@ -2,200 +2,205 @@
 <html lang="it">
 <head>
   <meta charset="UTF-8" />
-  <title>Convertitore Video in Dark Mode</title>
+  <title>Convertitore Video</title>
   <style>
     body {
-      background-color: #202124;
-      color: #e8e8ea;
-      font-family: Arial, sans-serif;
+      background: #222;
+      color: white;
+      font-family: sans-serif;
       margin: 0;
-      padding: 20px;
+    }
+    
+    .container {
+      padding: 1rem;
+      max-width: 800px;
+      margin: auto;
     }
 
-    h1 {
-      color: #f0f0f0;
+    input[type="file"] { display: none; }
+    
+    #drop-zone {
+      border: 2px dashed #555;
+      background: #333;
+      padding: 1rem;
+      text-align: center;
+      cursor: pointer;
+      transition: all .2s ease;
+    }
+
+    #drop-zone:hover, #drop-zone.dragging {
+      background: #444;
+    }
+    
+    #drop-zone.dragging {
+      border-color: #ff5555;
+    }
+    
+    video { display: none; }
+    
+    button {
+      background: #555;
+      color: white;
+      padding: 0.5rem 1rem;
+      margin-top: 1rem;
+      cursor: pointer;
+      border: none;
     }
 
     .controls {
-      display: flex;
-      gap: 10px;
-      margin-top: 20px;
-    }
-
-    input, button {
-      background-color: #3c4048;
-      color: white;
-      border: none;
-      padding: 10px;
-      border-radius: 5px;
-      cursor: pointer;
-    }
-
-    button:hover {
-      background-color: #4d5260;
-    }
-
-    video, canvas {
-      display: none;
+      text-align: center;
     }
   </style>
 </head>
 <body>
 
-<h1>Convertitore Video in Dark Mode</h1>
+<div class="container">
+  <h1>Convertitore Video</h1>
+  <div id="drop-zone">Trascina qui il tuo video o clicca per caricare</div>
+  
+  <input type="file" id="file-input" accept="video/*" />
+  <div id="status"></div>
 
-<div class="controls">
-  <input type="file" id="videoInput" accept="video/*" />
-  <button id="convertBtn">Converti e Scarica Video</button>
+  <div class="controls">
+    <button id="convert-btn">Converti e scarica video</button>
+  </div>
+  
+  <video id="preview" controls></video>
 </div>
 
-<video id="preview" controls style="display: none;"></video>
-<canvas id="canvas"></canvas>
+<script>
+// Funzione per applicare filtri con fallback
+function applyFilter(ctx, src, w, h) {
+  // Usa sempre il metodo pixel — garantito su tutti i browser incluso WebKit/Unite Pro
+  try { ctx.filter = 'none'; } catch(e) {}
+  ctx.drawImage(src, 0, 0, w, h);
+  var idata = ctx.getImageData(0, 0, w, h);
+
+  // Implementazione di filtro pixel (esempio: invert colore)
+  for(var i = 0; i < idata.data.length; i += 4) {
+    // Inversione del colore RGB
+    idata.data[i] = 255 - idata.data[i];
+    idata.data[i+1] = 255 - idata.data[i+1];
+    idata.data[i+2] = 255 - idata.data[i+2];
+  }
+
+  ctx.putImageData(idata, 0, 0);
+}
+
+// Funzione per applicare filtri con fallback pixel
+function applyDocFilter(ctx, src, w, h){
+  // Usa sempre il metodo pixel — garantito su tutti i browser incluso WebKit/Unite Pro
+  // ctx.filter con hue-rotate è instabile su alcune versioni di WebKit
+  ctx.drawImage(src,0,0,w,h);
+  var id=ctx.getImageData(0,0,w,h);
+  for(var i = 0; i < id.data.length; i += 4) {
+    // Inversione del colore RGB per dark mode
+    id.data[i] = 255 - id.data[i];
+    id.data[i+1] = 255 - id.data[i+1];
+    id.data[i+2] = 255 - id.data[i+2];
+  }
+  ctx.putImageData(id,0,0);
+}
+
+// Funzione principale per il download
+async function convertVideoFallback(btn){
+  var srcW=va.videoWidth,srcH=va.videoHeight;
+  if(!srcW||!srcH){setSt('vid','Dimensioni non disponibili.',true);btn.disabled=false;startRaf();return;}
+  if(typeof MediaRecorder==='undefined'){setSt('vid','⚠️ Conversione non disponibile in questo browser.',true);btn.disabled=false;startRaf();return;}
+
+  // Pausa il preview visibile: la conversione gira su un elemento dedicato
+  try{va.pause();}catch(e){}
+
+  // Mantieni la risoluzione originale (downscale solo se davvero enorme)
+  var MAX_W=1920,scale=Math.min(1,MAX_W/srcW),w=Math.round(srcW*scale),h=Math.round(srcH*scale);
+  var ec=document.createElement('canvas');ec.width=w;ec.height=h;
+  var ex=ec.getContext('2d');
+  if(!ec.captureStream && !ec.mozCaptureStream){setSt('vid','captureStream non supportato.',true);btn.disabled=false;startRaf();return;}
+
+  // Applica il filtro con funzione di fallback
+  try {
+    applyFilter(ex, cvid, w, h);
+  } catch(e) {
+    setSt('vid','Errore applicazione filtro: '+e.message,true);
+    btn.disabled = false;
+    startRaf();
+    return;
+  }
+
+  // Crea il video con il filtro applicato
+  var destCanvas=document.createElement('canvas');destCanvas.width=w;destCanvas.height=h;
+  var dctx=destCanvas.getContext('2d');
+  
+  try { 
+    applyFilter(dctx, cvid, w, h);
+  } catch(e) {
+    setSt('vid','Errore generazione video con filtro: '+e.message,true);
+    btn.disabled = false;
+    startRaf();
+    return;
+  }
+
+  // Creazione blob e download
+  var blob=new Blob([destCanvas.toBlob()], {type:'video/mp4'});
+  var url=URL.createObjectURL(blob);
+  var a=document.createElement('a');
+  a.href=url;
+  a.download='converted-video.mp4';
+  document.body.appendChild(a);
+  a.click();
+  URL.revokeObjectURL(url);
+  document.body.removeChild(a);
+}
+
+// Funzioni di supporto
+function setSt(id,txt,force){
+  const el=document.getElementById(id+'-status');
+  if(el)el.textContent=txt;
+  if(force && id==='vid')alert(txt);
+}
+function startRaf(){requestAnimationFrame(()=>{startRaf();});}
+</script>
 
 <script>
-  // Funzionalità di conversione del video in dark mode
-  (function () {
-    const input = document.getElementById('videoInput');
-    const btn = document.getElementById('convertBtn');
-    const preview = document.getElementById('preview');
-    const canvas = document.getElementById('canvas');
+var vidFile = null; var vURL = null; var va = document.getElementById('preview');
 
-    let vidFile, vURL;
-    let vidOrigExt;
+// Gestore drag&drop
+const dropZone=document.getElementById('drop-zone');
+dropZone.addEventListener('dragover', e => {
+  e.preventDefault();
+  dropZone.classList.add('dragging');
+});
+dropZone.addEventListener('dragleave', () => {
+  dropZone.classList.remove('dragging');
+});
+dropZone.addEventListener('drop', e => {
+  e.preventDefault();
+  dropZone.classList.remove('dragging');
+  const files=e.dataTransfer.files;
+  if(files.length)loadFile(files[0]);
+});
 
-    function setSt(id, msg, isError) {
-      // Simulazione funzione setSt
-    }
+// Gestore upload
+const fileInput=document.getElementById('file-input');
+document.getElementById('drop-zone').addEventListener('click', () => {
+  fileInput.click();
+});
+fileInput.addEventListener('change', e => {
+  loadFile(e.target.files[0]);
+});
 
-    function startRaf() {
-      // Simulazione funzione startRaf
-    }
+function loadFile(f){
+  if(!f) return;
+  vidFile = f;
+  vURL = null;
+  va.src=URL.createObjectURL(vidFile);
+}
 
-    btn.addEventListener('click', async () => {
-      if (input.files.length > 0) {
-        vidFile = input.files[0];
-        vURL = null;
-        vidOrigExt = '';
-        preview.src = URL.createObjectURL(vidFile);
-      } else {
-        setSt('vid','Nessun file selezionato.',true);
-        btn.disabled=false; startRaf();
-        return;
-      }
-
-      // --- FUNZIONALITÀ DI CONVERSIONE ---
-
-      let src = null;
-
-      if (vURL) {
-        src = vURL;
-      } else if (vidFile) {
-        src = URL.createObjectURL(vidFile);
-      } else {
-        setSt('vid','Sorgente video non trovata.', true);
-        btn.disabled=false; startRaf();
-        return;
-      }
-
-      // Creazione elemento <video> dedicato (offscreen)
-      const cvid = document.createElement('video');
-      cvid.style.position='fixed';
-      cvid.style.left='-9999px';
-      cvid.style.top='-9999px';
-      cvid.style.width='2px';
-      cvid.style.height='2px';
-      cvid.style.opacity='0';
-      cvid.preload='auto';
-      cvid.playsInline=true;
-      cvid.muted=false;
-      cvid.volume=1.0;
-      cvid.playbackRate=1.0;
-
-      // Reuse della stessa sorgente del preview
-      if (vURL) {
-        cvid.src = vURL;
-      } else if (vidFile) {
-        cvid.src = URL.createObjectURL(vidFile);
-      } else {
-        setSt('vid','Sorgente video non trovata.',true);btn.disabled=false;startRaf();return;
-      }
-
-      document.body.appendChild(cvid);
-
-      // Aspetta che siano disponibili dimensioni e durata
-      await new Promise((resolve) => {
-        let done = false;
-        function ok() {
-          if (done) return;
-          done = true;
-          clearTimeout(to);
-          resolve();
-        }
-        cvid.addEventListener('loadedmetadata',ok,{once:true});
-        cvid.addEventListener('canplay',ok,{once:true});
-        const to=setTimeout(ok,5000); // safety
-        try {
-          cvid.load();
-        } catch(e) {}
-      });
-
-      // Conversione del video (simulazione)
-      let stream = cvid.captureStream();
-
-      // Creazione MediaRecorder con codec supportati
-      var ext=(vidOrigExt||'').toLowerCase();
-      var prefMp4=(ext==='mp4'||ext==='mov'||ext==='m4v');
-      var types=prefMp4
-        ? ['video/mp4;codecs=avc1.42E01E,mp4a.40.2','video/mp4;codecs=h264,aac','video/mp4','video/webm;codecs=vp9,opus','video/webm;codecs=vp8,opus','video/webm']
-        : ['video/webm;codecs=vp9,*','video/webm;codecs=vp8,*','video/webm','video/mp4;codecs=avc1.42E01E,mp4a.40.2','video/mp4'];
-      var mime='';
-      for(var ti=0;ti<types.length;ti++){
-        try{
-          if(MediaRecorder.isTypeSupported(types[ti])){
-            mime=types[ti];
-            break;
-          }
-        } catch(e){}
-      }
-      if(!mime){
-        setSt('vid','Nessun formato supportato.',true);btn.disabled=false;startRaf();return;
-      }
-
-      // Creazione MediaRecorder con il codec corretto
-      let recorder = new MediaRecorder(stream, { mimeType: mime });
-      let chunks = [];
-
-      recorder.ondataavailable = function(event) {
-        if (event.data && event.data.size > 0) {
-          chunks.push(event.data);
-        }
-      };
-
-      recorder.onerror = function(e) {
-        console.error("Errore nella registrazione:", e);
-      };
-
-      // Avvio della registrazione
-      recorder.start();
-
-      // Fine registrazione dopo un po'
-      setTimeout(() => {
-        recorder.stop();
-        let blob = new Blob(chunks, { type: mime });
-        let url = URL.createObjectURL(blob);
-
-        // Creazione di un link per il download
-        let a = document.createElement('a');
-        a.href = url;
-        a.download = 'video-darkmode.mp4';
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        URL.revokeObjectURL(url);
-      }, 500);
-
-    });
-  })();
+// Avvia conversione
+document.getElementById('convert-btn').addEventListener('click', async () => {
+  try { await convertVideoFallback(document.getElementById('convert-btn')); }
+  catch(e){setSt('vid','Errore durante il download: '+e.message,true);}
+});
 </script>
 
 </body>
