@@ -2,141 +2,168 @@
 <html lang="it">
 <head>
     <meta charset="UTF-8">
-    <title>Convertitore Video</title>
+    <title>Video Editor</title>
     <style>
         body {
-            font-family: Arial, sans-serif;
-            max-width: 800px;
-            margin: auto;
-            padding: 20px;
+            margin: 0;
+            padding: 10px;
+            font-family: sans-serif;
         }
-        #drop-zone {
-            border: 2px dashed #ccc;
-            padding: 20px;
-            text-align: center;
-            cursor: pointer;
-            background-color: #f9f9f9;
+        video { display: none; }
+        canvas {display: none;}
+        #btn {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
         }
-        #drop-zone.dragging {
-            background-color: #e9e9e9;
+        .bar {
+            width: 100%;
+            height: 10px;
+            background-color: lightgray;
         }
-        .status {
-            margin-top: 10px;
-            font-weight: bold;
-        }
-        button {
-            margin-top: 20px;
-            padding: 10px 20px;
-            cursor: pointer;
+        .barfill {
+            background-color: blue;
+            height: 100%;
+            width: 0%;
         }
     </style>
 </head>
 <body>
 
-<div id="drop-zone">
-    <p>Trascina qui o clicca per selezionare un video</p>
-    <input type="file" id="file-input" accept="video/*" style="display:none;">
-</div>
+<video id="v" controls></video>
+<canvas id="c"></canvas>
 
-<button id="convert-btn">Converti e scarica video</button>
+<script type="text/javascript">
+// ── Crea un elemento <video> dedicato (offscreen) per la conversione.
+//    Evita il problema "il preview si pausa" causato da captureStream sullo
+//    stesso elemento che è già in riproduzione visibile (osservato su file://).
+var cvid=document.createElement('video');
+cvid.style.position='fixed';cvid.style.left='-9999px';cvid.style.top='-9999px';
+cvid.style.width='2px';cvid.style.height='2px';cvid.style.opacity='0';
+cvid.preload='auto';cvid.playsInline=true;cvid.muted=false;cvid.volume=1.0;cvid.playbackRate=1.0;
+// Riusa la stessa sorgente del preview (blob: URL o file caricato)
+if(vURL){cvid.src=vURL;}
+else if(vidFile){cvid.src=URL.createObjectURL(vidFile);}
+else {setSt('vid','Sorgente video non trovata.',true);btn.disabled=false;startRaf();return;}
+document.body.appendChild(cvid);
 
-<div class="status" id="vid-status"></div>
-
-<script>
-var vidFile = null;
-var vURL = null;
-var va = document.getElementById('preview');
-
-// Gestore drag&drop
-const dropZone=document.getElementById('drop-zone');
-dropZone.addEventListener('dragover', e => {
-    e.preventDefault();
-    dropZone.classList.add('dragging');
-});
-dropZone.addEventListener('dragleave', () => {
-    dropZone.classList.remove('dragging');
-});
-dropZone.addEventListener('drop', e => {
-    e.preventDefault();
-    dropZone.classList.remove('dragging');
-    const files=e.dataTransfer.files;
-    if(files.length)loadFile(files[0]);
+// Aspetta che siano disponibili dimensioni e durata
+await new Promise(function(resolve){
+    var done=false;
+    function ok(){if(done)return;done=true;clearTimeout(to);resolve();}
+    cvid.addEventListener('loadedmetadata',ok,{once:true});
+    cvid.addEventListener('canplay',ok,{once:true});
+    var to=setTimeout(ok,5000); // safety
+    try{cvid.load();}catch(e){}
 });
 
-// Gestore upload
-const fileInput=document.getElementById('file-input');
-document.getElementById('drop-zone').addEventListener('click', () => {
-    fileInput.click();
-});
-fileInput.addEventListener('change', e => {
-    loadFile(e.target.files[0]);
-});
+// Pre-pinge il primo frame così il blob non parte vuoto
+try{ex.filter=flt;ex.drawImage(cvid,0,0,w,h);ex.filter='none';}catch(e){}
 
-function loadFile(f){
-    if(!f) return;
-    vidFile = f;
-    vURL = null;
-    va.src=URL.createObjectURL(vidFile);
+// Riprendi l'audio context se è sospeso (alcuni browser lo creano in suspended)
+if(audioCtx && audioCtx.state==='suspended'){
+    try{await audioCtx.resume();}catch(e){console.warn('[DDC] audioCtx.resume failed:',e);}
 }
 
-// Funzione principale di conversione
-async function convertVideo() {
-    // Creazione elemento video offscreen
-    var cvid=document.createElement('video');
-    cvid.style.position='fixed';cvid.style.left='-9999px';cvid.style.top='-9999px';
-    cvid.style.width='2px';cvid.style.height='2px';cvid.style.opacity='0';
-    cvid.preload='auto';cvid.playsInline=true;cvid.muted=false;cvid.volume=1.0;cvid.playbackRate=1.0;
-    
-    if(vURL){cvid.src=vURL;}
-    else if(vidFile){cvid.src=URL.createObjectURL(vidFile);}
-    else {setSt('vid','Sorgente video non trovata.',true);return;}
-    
-    document.body.appendChild(cvid);
-    
-    // Aspetta che siano disponibili dimensioni e durata
-    await new Promise(function(resolve){
-        var done=false;
-        function ok(){if(done)return;done=true;clearTimeout(to);resolve();}
-        cvid.addEventListener('loadedmetadata',ok,{once:true});
-        cvid.addEventListener('canplay',ok,{once:true});
-        var to=setTimeout(ok,5000);
-        try{cvid.load();}catch(e){}
-    });
-    
-    // Creazione canvas per il processing
-    var canvas=document.createElement('canvas');
-    canvas.width=cvid.videoWidth;
-    canvas.height=cvid.videoHeight;
-    var ctx=canvas.getContext('2d');
-    
-    // Applica filtro dark mode
-    ctx.filter = 'contrast(0.7) brightness(0.8)';
-    ctx.drawImage(cvid, 0, 0, cvid.videoWidth, cvid.videoHeight);
-    
-    // Converti in blob
-    var blob=new Blob([canvas.toDataURL('video/mp4')], {type:'video/mp4'});
-    var url=URL.createObjectURL(blob);
-    var a=document.createElement('a');
-    a.href=url;
-    a.download='converted-video.mp4';
-    document.body.appendChild(a);
-    a.click();
-    URL.revokeObjectURL(url);
-    document.body.removeChild(a);
+// NESSUN playbackRate>1: rovinerebbe la sincronia audio
+rec.start(250);startTs=Date.now();
+try{await cvid.play();}catch(e){
+    stopRec();disposeCvid();
+    setSt('vid','Errore avvio video: '+e.message,true);btn.disabled=false;startRaf();return;
 }
 
-// Funzioni di supporto
-function setSt(id,txt,force){
-    const el=document.getElementById(id+'-status');
-    if(el)el.textContent=txt;
-    if(force && id==='vid')alert(txt);
+// Disegna ogni frame tramite rAF: affidabile, non si blocca come rVFC
+function rafLoop(){
+    if(recStopped)return;
+    if(cvid.ended||(dur&&cvid.currentTime>=dur-0.05)){stopRec();return;}
+    // Disegna solo se il video ha dati decodificati (readyState >= HAVE_CURRENT_DATA)
+    if(cvid.readyState>=2){
+        try{ex.filter=flt;ex.drawImage(cvid,0,0,w,h);ex.filter='none';}catch(e){}
+        if(dur>0) setBar('vid',Math.round((cvid.currentTime/dur)*16));
+    }
+    frameIv=requestAnimationFrame(rafLoop);
 }
-function startRaf(){requestAnimationFrame(()=>{startRaf();});}
+frameIv=requestAnimationFrame(rafLoop);
 
-document.getElementById('convert-btn').addEventListener('click', async () => {
-    try { await convertVideo(); }
-    catch(e){setSt('vid','Errore durante il download: '+e.message,true);}
-});
+// Cattura il video filtrato dal canvas
+var canvasStream;
+try{canvasStream=(ec.captureStream||ec.mozCaptureStream).call(ec,30);}
+catch(e){
+    try{document.body.removeChild(cvid);}catch(e2){}
+    setSt('vid','Errore stream canvas.',true);btn.disabled=false;startRaf();return;
+}
+
+// Stream combinato: video filtrato + audio originale
+var videoTracks=canvasStream.getVideoTracks();
+var combined=new MediaStream([].concat(videoTracks,audioTracks));
+console.log('[DDC] Combined:',videoTracks.length,'video +',audioTracks.length,'audio');
+
+// Bitrate alto per non perdere qualità rispetto all'originale
+var recOpts={mimeType:mime,videoBitsPerSecond:5000000};
+if(audioTracks.length>0)recOpts.audioBitsPerSecond=192000;
+var rec;try{rec=new MediaRecorder(combined,recOpts);}
+catch(e){
+    try{document.body.removeChild(cvid);}catch(e2){}
+    setSt('vid','Errore MediaRecorder: '+e.message,true);btn.disabled=false;startRaf();return;
+}
+vidChunks=[];rec.ondataavailable=function(e){if(e.data&&e.data.size>0)vidChunks.push(e.data);};
+
+var flt=F,startTs=null,frameIv=null,watchdog=null,etaIv=null;
+var recStopped=false;
+
+// ── Funzioni per gestire l'interfaccia utente
+function setSt(id,msg,er){if(er){msg='Error: '+msg;}else{msg='Info: '+msg;}document.getElementById(''+id).innerHTML=msg;}
+function startRaf(){window.requestAnimationFrame(function(){console.log('[DDC] rAF');});}
+function stopRec(){rec.stop();rec.ondataavailable=null;disposeCvid();}
+function disposeCvid(){try{cvid.pause();cvid.src='';}catch(e){}}
+function setBar(id,perc){document.getElementById(''+id).style.width=perc+'%';}
+
+// ── Funzioni per applicare i filtri
+function applyFilter(ex, cvid, w, h) {
+    if (flt && flt !== 'none') {
+        ex.filter = flt;
+        ex.drawImage(cvid, 0, 0, w, h);
+        ex.filter = 'none';
+    } else {
+        ex.drawImage(cvid, 0, 0, w, h);
+    }
+}
+
+// ── Funzioni per convertire il video
+async function convertVideoFallback() {
+    if (cvid.readyState < 2) return;
+    applyFilter(ex, cvid, w, h); // Usa la funzione applyFilter qui
+}
+</script>
+
+<script type="text/javascript">
+var vidFile = null; vURL = null; var btn=document.getElementById('btn');
+var canvas= document.getElementById('c'); var ec=canvas.getContext('2d');
+var ex=ec; var dur=0;
+var flt='none'; // default
+
+// ── Configurazione e inizializzazione
+window.onload=function(){
+    if (!document.querySelector('#v')) {return;}
+    vURL = window.location.href.split('?')[1] ? decodeURIComponent(window.location.search) : null;
+    if (vURL && !vURL.startsWith('blob:')) {
+        try{new URL(vURL);setSt('vid','File non supportato.',false);btn.disabled=false;startRaf();return;}
+        catch(e){console.warn('[DDC] URL invalid',e);}
+    }
+};
+
+// ── Funzioni per gestire l'interfaccia utente
+function setSt(id,msg,er){if(er){msg='Error: '+msg;}else{msg='Info: '+msg;}document.getElementById(''+id).innerHTML=msg;}
+function startRaf(){window.requestAnimationFrame(function(){console.log('[DDC] rAF');});}
+function stopRec(){rec.stop();rec.ondataavailable=null;disposeCvid();}
+function disposeCvid(){try{cvid.pause();cvid.src='';}catch(e){}}
+function setBar(id,perc){document.getElementById(''+id).style.width=perc+'%';}
+
+// ── Funzioni per convertire il video
+async function convertVideoFallback() {
+    if (cvid.readyState < 2) return;
+    applyFilter(ex, cvid, w, h); // Usa la funzione applyFilter qui
+}
 </script>
 
 </body>
