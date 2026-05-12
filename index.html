@@ -695,54 +695,47 @@ async function convertVideoFallback(btn){
   if(!srcW||!srcH){setSt('vid','Dimensioni non disponibili.',true);btn.disabled=false;startRaf();return;}
   if(typeof MediaRecorder==='undefined'){setSt('vid','⚠️ Conversione non disponibile in questo browser.',true);btn.disabled=false;startRaf();return;}
 
-  // Rileva Safari (WebKit): comportamento diverso per mimeType, captureStream, audio e download
-  var isSafari=/^((?!chrome|android).)*safari/i.test(navigator.userAgent)
-    || (navigator.vendor&&navigator.vendor.indexOf('Apple')>-1
-        && navigator.userAgent.indexOf('CriOS')===-1
-        && navigator.userAgent.indexOf('FxiOS')===-1);
-
+  // Pausa il preview visibile: la conversione gira su un elemento dedicato
   try{va.pause();}catch(e){}
 
+  // Mantieni la risoluzione originale (downscale solo se davvero enorme)
   var MAX_W=1920,scale=Math.min(1,MAX_W/srcW),w=Math.round(srcW*scale),h=Math.round(srcH*scale);
   var ec=document.createElement('canvas');ec.width=w;ec.height=h;
   var ex=ec.getContext('2d');
-  var canCapture=!!(ec.captureStream||ec.mozCaptureStream);
-  if(!canCapture){setSt('vid','captureStream non supportato.',true);btn.disabled=false;startRaf();return;}
+  if(!ec.captureStream && !ec.mozCaptureStream){setSt('vid','captureStream non supportato.',true);btn.disabled=false;startRaf();return;}
 
-  // ── mimeType: Safari accetta solo 'video/mp4' senza codec string ──
+  // Preferisci lo stesso container dell'originale; codec espliciti (alcuni browser
+  // dichiarano 'video/mp4' come supportato ma poi non includono l'audio)
   var ext=(vidOrigExt||'').toLowerCase();
   var prefMp4=(ext==='mp4'||ext==='mov'||ext==='m4v');
-  var types;
-  if(isSafari){
-    // Safari 17+ supporta MediaRecorder ma SOLO video/mp4 (senza codec espliciti)
-    types=['video/mp4'];
-  } else if(prefMp4){
-    types=['video/mp4;codecs=avc1.42E01E,mp4a.40.2','video/mp4;codecs=h264,aac','video/mp4',
-           'video/webm;codecs=vp9,opus','video/webm;codecs=vp8,opus','video/webm'];
-  } else {
-    types=['video/webm;codecs=vp9,opus','video/webm;codecs=vp8,opus','video/webm',
-           'video/mp4;codecs=avc1.42E01E,mp4a.40.2','video/mp4'];
-  }
+  var types=prefMp4
+    ? ['video/mp4;codecs=avc1.42E01E,mp4a.40.2','video/mp4;codecs=h264,aac','video/mp4','video/webm;codecs=vp9,opus','video/webm;codecs=vp8,opus','video/webm']
+    : ['video/webm;codecs=vp9,opus','video/webm;codecs=vp8,opus','video/webm','video/mp4;codecs=avc1.42E01E,mp4a.40.2','video/mp4'];
   var mime='';
   for(var ti=0;ti<types.length;ti++){try{if(MediaRecorder.isTypeSupported(types[ti])){mime=types[ti];break;}}catch(e){}}
   if(!mime){setSt('vid','Nessun formato supportato.',true);btn.disabled=false;startRaf();return;}
   var chosenExt=mime.indexOf('mp4')!==-1?'mp4':'webm';
 
-  // ── Elemento video offscreen per la conversione ──
+  // ── Crea un elemento <video> dedicato (offscreen) per la conversione.
+  //    Evita il problema "il preview si pausa" causato da captureStream sullo
+  //    stesso elemento che è già in riproduzione visibile (osservato su file://).
   var cvid=document.createElement('video');
-  cvid.style.cssText='position:fixed;left:-9999px;top:-9999px;width:2px;height:2px;opacity:0;pointer-events:none;';
+  cvid.style.position='fixed';cvid.style.left='-9999px';cvid.style.top='-9999px';
+  cvid.style.width='2px';cvid.style.height='2px';cvid.style.opacity='0';
   cvid.preload='auto';cvid.playsInline=true;cvid.muted=false;cvid.volume=1.0;cvid.playbackRate=1.0;
+  // Riusa la stessa sorgente del preview (blob: URL o file caricato)
   if(vURL){cvid.src=vURL;}
   else if(vidFile){cvid.src=URL.createObjectURL(vidFile);}
-  else{setSt('vid','Sorgente video non trovata.',true);btn.disabled=false;startRaf();return;}
+  else {setSt('vid','Sorgente video non trovata.',true);btn.disabled=false;startRaf();return;}
   document.body.appendChild(cvid);
 
+  // Aspetta che siano disponibili dimensioni e durata
   await new Promise(function(resolve){
     var done=false;
     function ok(){if(done)return;done=true;clearTimeout(to);resolve();}
     cvid.addEventListener('loadedmetadata',ok,{once:true});
     cvid.addEventListener('canplay',ok,{once:true});
-    var to=setTimeout(ok,5000);
+    var to=setTimeout(ok,5000); // safety
     try{cvid.load();}catch(e){}
   });
 
@@ -752,67 +745,69 @@ async function convertVideoFallback(btn){
     setSt('vid','Durata non disponibile.',true);btn.disabled=false;startRaf();return;
   }
 
+  // Riavvolgi all'inizio con safety-net (alcuni browser non emettono 'seeked' se già a 0)
   await new Promise(function(r){
     var done=false;
     var fn=function(){if(done)return;done=true;cvid.removeEventListener('seeked',fn);clearTimeout(to);r();};
     cvid.addEventListener('seeked',fn);
-    var to=setTimeout(fn,3000);
+    var to=setTimeout(fn,3000); // timeout di sicurezza, senza il 200ms prematuro
     try{cvid.currentTime=0;}catch(e){fn();}
   });
 
-  // ── Cattura audio ──
-  // Safari: createMediaElementSource() funziona SOLO se chiamato prima di captureStream.
-  // Inoltre su Safari l'AudioContext va creato/ripreso dentro un gesto utente (già siamo
-  // dentro il click handler), quindi funziona. Su altri browser la logica è invariata.
+  // Cattura audio: instrada il video tramite WebAudio in un MediaStreamDestination,
+  //   SENZA collegarlo a audioCtx.destination → audio registrato ma SILENZIOSO
+  //   negli speaker durante la conversione (l'utente non sente nulla).
   var audioTracks=[];
   var audioCtx=null;
-  var extraBlobURL=null; // usato se creiamo un secondo blob URL per cvid
-
   try{
     var ACClass=window.AudioContext||window.webkitAudioContext;
     if(ACClass){
       audioCtx=new ACClass();
-      // Su Safari, resume() sincrono è necessario subito dopo la creazione
-      if(audioCtx.state==='suspended'){try{await audioCtx.resume();}catch(e){}}
-      var audioSrc=audioCtx.createMediaElementSource(cvid);
-      var audioDst=audioCtx.createMediaStreamDestination();
-      audioSrc.connect(audioDst);
-      // Non colleghiamo a audioCtx.destination → silenzio durante la conversione
-      audioTracks=audioDst.stream.getAudioTracks();
-      console.log('[DDC] Audio via WebAudio:',audioTracks.length);
+      var src=audioCtx.createMediaElementSource(cvid);
+      var dst=audioCtx.createMediaStreamDestination();
+      src.connect(dst);
+      // (non chiamiamo src.connect(audioCtx.destination) → niente speaker)
+      audioTracks=dst.stream.getAudioTracks();
+      console.log('[DDC] Audio captured via WebAudio (muto su speaker):',audioTracks.length);
+    } else {
+      // Fallback: captureStream + cerco di mutare l'output
+      var capFn=cvid.captureStream||cvid.mozCaptureStream;
+      if(capFn){
+        var cvStream=capFn.call(cvid);
+        audioTracks=cvStream.getAudioTracks();
+        try{cvid.muted=true;}catch(e){}
+        console.log('[DDC] Audio via captureStream:',audioTracks.length);
+      }
     }
   }catch(e){
-    console.warn('[DDC] WebAudio failed:',e);
-    // Fallback: captureStream sul cvid per estrarre audio
-    // (su Safari potrebbe non avere tracce audio, ma proviamo)
+    console.warn('[DDC] WebAudio capture failed, fallback captureStream:',e);
     try{
-      var capFnA=cvid.captureStream||cvid.mozCaptureStream;
-      if(capFnA){
-        var cvStreamA=capFnA.call(cvid);
-        audioTracks=cvStreamA.getAudioTracks();
-        console.log('[DDC] Audio fallback captureStream:',audioTracks.length);
+      var capFn2=cvid.captureStream||cvid.mozCaptureStream;
+      if(capFn2){
+        var cvStream2=capFn2.call(cvid);
+        audioTracks=cvStream2.getAudioTracks();
+        try{cvid.muted=true;}catch(e2){}
+        console.log('[DDC] Audio via captureStream (fallback):',audioTracks.length);
       }
-    }catch(e2){console.warn('[DDC] Audio fallback failed:',e2);}
+    }catch(e3){console.warn('[DDC] captureStream error:',e3);}
   }
 
-  // ── captureStream sul canvas ──
-  // Safari: captureStream(0) è più stabile di captureStream(30)
+  // Cattura il video filtrato dal canvas
   var canvasStream;
-  var capFps=isSafari?0:30;
-  try{canvasStream=(ec.captureStream||ec.mozCaptureStream).call(ec,capFps);}
+  try{canvasStream=(ec.captureStream||ec.mozCaptureStream).call(ec,30);}
   catch(e){
     try{document.body.removeChild(cvid);}catch(e2){}
     setSt('vid','Errore stream canvas.',true);btn.disabled=false;startRaf();return;
   }
 
+  // Stream combinato: video filtrato + audio originale
   var videoTracks=canvasStream.getVideoTracks();
   var combined=new MediaStream([].concat(videoTracks,audioTracks));
-  console.log('[DDC] Combined:',videoTracks.length,'video +',audioTracks.length,'audio | safari:',isSafari,'| mime:',mime);
+  console.log('[DDC] Combined:',videoTracks.length,'video +',audioTracks.length,'audio');
 
-  // Su Safari non passiamo videoBitsPerSecond: può causare errori con mp4
-  var recOpts=isSafari?{mimeType:mime}:{mimeType:mime,videoBitsPerSecond:5000000};
-  if(!isSafari&&audioTracks.length>0)recOpts.audioBitsPerSecond=192000;
-
+  // Bitrate alto per non perdere qualità rispetto all'originale
+  var recOpts={mimeType:mime,videoBitsPerSecond:5000000};
+  if(audioTracks.length>0)recOpts.audioBitsPerSecond=192000;
   var rec;try{rec=new MediaRecorder(combined,recOpts);}
   catch(e){
     try{document.body.removeChild(cvid);}catch(e2){}
@@ -820,9 +815,10 @@ async function convertVideoFallback(btn){
   }
   vidChunks=[];rec.ondataavailable=function(e){if(e.data&&e.data.size>0)vidChunks.push(e.data);};
 
-  var flt=F,startTs=null,frameIv=null,watchdog=null,etaIv=null;
+  var flt=F,fltMixed=contentMixed,startTs=null,frameIv=null,watchdog=null,etaIv=null;
   var recStopped=false;
 
+  // Auto-resume se il video offscreen viene messo in pausa per qualunque motivo
   function onCvidPause(){
     if(recStopped||cvid.ended)return;
     console.warn('[DDC] cvid pausato, riprendo');
@@ -846,7 +842,6 @@ async function convertVideoFallback(btn){
     try{cvid.pause();}catch(e){}
     try{cvid.removeAttribute('src');cvid.load();}catch(e){}
     try{document.body.removeChild(cvid);}catch(e){}
-    try{if(extraBlobURL)URL.revokeObjectURL(extraBlobURL);}catch(e){}
     try{if(audioCtx&&audioCtx.state!=='closed')audioCtx.close();}catch(e){}
   }
 
@@ -860,92 +855,75 @@ async function convertVideoFallback(btn){
   rec.onstop=function(){
     cleanupTimers();
     disposeCvid();
-    if(!vidChunks.length){setSt('vid','Errore: nessun frame catturato.',true);btn.disabled=false;startRaf();return;}
+    if(!vidChunks.length){setSt('vid','Errore: nessun frame.',true);btn.disabled=false;startRaf();return;}
     vidBlob=new Blob(vidChunks,{type:mime});vidExt=chosenExt;
-    var blobURL=URL.createObjectURL(vidBlob);
-    var fname=darkName(vidBaseName,chosenExt);
-    if(isSafari){
-      // Safari blocca a.click() su blob URL generati da script.
-      // Soluzione: mostra un link visibile e cliccabile dall'utente.
-      var dl=document.getElementById('vid-safari-dl');
-      if(!dl){
-        dl=document.createElement('a');
-        dl.id='vid-safari-dl';
-        dl.style.cssText='display:block;margin:8px auto;padding:10px 18px;background:#fff;'
-          +'color:#111;border-radius:8px;text-align:center;font-weight:700;font-size:13px;'
-          +'text-decoration:none;max-width:320px;border:1px solid #444;';
-        var vidWrap=document.getElementById('vid-wrap');
-        if(vidWrap)vidWrap.appendChild(dl);
-        else document.body.appendChild(dl);
-      }
-      dl.href=blobURL;
-      dl.download=fname;
-      dl.textContent='⬇ Tocca qui per scaricare il video dark';
-      dl.style.display='block';
-      // Prova anche il click automatico — su alcune versioni di Safari funziona
-      try{dl.click();}catch(e){}
-      var mb=(vidBlob.size/1024/1024).toFixed(1);
-      setBar('vid',100);setSt('vid','✓ Pronto — '+mb+' MB — tocca il link per scaricare');
-    } else {
-      var a=document.createElement('a');
-      a.href=blobURL;a.download=fname;
-      document.body.appendChild(a);a.click();
-      setTimeout(function(){try{document.body.removeChild(a);}catch(e){}URL.revokeObjectURL(blobURL);},60000);
-      var mb=(vidBlob.size/1024/1024).toFixed(1);
-      setBar('vid',100);setSt('vid','✓ Scaricato — '+mb+' MB'+(audioTracks.length?' (con audio)':' (senza audio)'));
-    }
+    var blobURL=URL.createObjectURL(vidBlob),a=document.createElement('a');
+    a.href=blobURL;a.download=darkName(vidBaseName,chosenExt);
+    document.body.appendChild(a);a.click();
+    setTimeout(function(){try{document.body.removeChild(a);}catch(e){}URL.revokeObjectURL(blobURL);},60000);
+    var mb=(vidBlob.size/1024/1024).toFixed(1);
+    setBar('vid',100);setSt('vid','✓ Scaricato — '+mb+' MB'+(audioTracks.length?' (con audio)':' (senza audio)'));
     btn.disabled=false;btn.textContent='Converti e scarica video';startRaf();
   };
   rec.onerror=function(e){cleanupTimers();disposeCvid();setSt('vid','Errore: '+(e.error?e.error.message:e),true);btn.disabled=false;startRaf();};
   cvid.addEventListener('ended',function(){stopRec();});
 
-  // Pre-ping primo frame
-  try{ex.filter=flt;ex.drawImage(cvid,0,0,w,h);ex.filter='none';}catch(e){}
+  // Helper: applica il filtro dark mode correttamente su tutti i browser
+  // (Safari non supporta ctx.filter — usa il fallback pixel di applyFilter/applyMixed)
+  function drawFilteredFrame(){
+    var savedF=F,savedMixed=contentMixed;
+    F=flt;contentMixed=fltMixed;
+    try{
+      if(fltMixed){applyMixed(ex,cvid,w,h);}
+      else{applyFilter(ex,cvid,w,h);}
+    }catch(e){}
+    F=savedF;contentMixed=savedMixed;
+  }
 
-  // Resume AudioContext se sospeso (Safari lo crea spesso in 'suspended')
-  if(audioCtx&&audioCtx.state==='suspended'){
+  // Pre-pinge il primo frame così il blob non parte vuoto
+  try{drawFilteredFrame();}catch(e){}
+
+  // Riprendi l'audio context se è sospeso (alcuni browser lo creano in suspended)
+  if(audioCtx && audioCtx.state==='suspended'){
     try{await audioCtx.resume();}catch(e){console.warn('[DDC] audioCtx.resume failed:',e);}
   }
 
+  // NESSUN playbackRate>1: rovinerebbe la sincronia audio
   rec.start(250);startTs=Date.now();
   try{await cvid.play();}catch(e){
     stopRec();disposeCvid();
     setSt('vid','Errore avvio video: '+e.message,true);btn.disabled=false;startRaf();return;
   }
 
-  // ── Loop rAF per disegnare ogni frame sul canvas con filtro dark ──
-  // Su Safari captureStream(0) richiede una notifica esplicita dopo ogni drawImage:
-  // chiamiamo requestFrame() se disponibile (WebKit lo espone sul VideoTrack).
-  var vTrack=videoTracks[0]||null;
+  // Disegna ogni frame tramite rAF: affidabile, non si blocca come rVFC
   function rafLoop(){
     if(recStopped)return;
     if(cvid.ended||(dur&&cvid.currentTime>=dur-0.05)){stopRec();return;}
+    // Disegna solo se il video ha dati decodificati (readyState >= HAVE_CURRENT_DATA)
     if(cvid.readyState>=2){
-      try{ex.filter=flt;ex.drawImage(cvid,0,0,w,h);ex.filter='none';}catch(e){}
-      // Su Safari con captureStream(0), notifica che il frame è pronto
-      if(isSafari&&vTrack&&typeof vTrack.requestFrame==='function'){
-        try{vTrack.requestFrame();}catch(e){}
-      }
-      if(dur>0)setBar('vid',Math.round((cvid.currentTime/dur)*100));
+      try{drawFilteredFrame();}catch(e){}
+      if(dur>0) setBar('vid',Math.round((cvid.currentTime/dur)*100));
     }
     frameIv=requestAnimationFrame(rafLoop);
   }
   frameIv=requestAnimationFrame(rafLoop);
 
+  // Watchdog: se currentTime non avanza per ~10s nonostante l'auto-resume, esci
   var lastT=-1,stallCount=0;
   watchdog=setInterval(function(){
     if(recStopped)return;
     var ct=cvid.currentTime;
-    if(ct<=lastT+0.05)stallCount++;else stallCount=0;
+    if(ct<=lastT+0.05) stallCount++; else stallCount=0;
     lastT=ct;
-    if(stallCount>=4&&cvid.paused&&!cvid.ended){
+    // Se stalla e il video è in pausa, riprova a riprodurlo
+    if(stallCount>=4 && cvid.paused && !cvid.ended){
       console.warn('[DDC] stall+paused, retry play');
       cvid.play().catch(function(){});
     }
     if(stallCount>=20){console.warn('[DDC] Stall detected, stopping');stopRec();}
   },500);
 }
-function clearVid(){stopRaf();if(vURL){URL.revokeObjectURL(vURL);vURL=null;}vidFile=null;va.pause();va.removeAttribute('src');va.load();F=FILTERS.night;contentMixed=false;vidExt='webm';document.getElementById('vid-wrap').style.display='none';document.getElementById('vid-ai').style.display='none';document.getElementById('vid-btn').disabled=true;document.getElementById('vid-st').textContent='';document.getElementById('vid-fill').style.width='0';vidBlob=null;vidChunks=[];var sdl=document.getElementById('vid-safari-dl');if(sdl){try{sdl.parentNode.removeChild(sdl);}catch(e){}}showDrop();}
+function clearVid(){stopRaf();if(vURL){URL.revokeObjectURL(vURL);vURL=null;}vidFile=null;va.pause();va.removeAttribute('src');va.load();F=FILTERS.night;contentMixed=false;vidExt='webm';document.getElementById('vid-wrap').style.display='none';document.getElementById('vid-ai').style.display='none';document.getElementById('vid-btn').disabled=true;document.getElementById('vid-st').textContent='';document.getElementById('vid-fill').style.width='0';vidBlob=null;vidChunks=[];showDrop();}
 </script>
 </div>
 </body>
