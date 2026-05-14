@@ -208,7 +208,7 @@ function setSt(id,h,e){var el=document.getElementById(id+'-st');el.innerHTML=h;e
 function setBar(id,v){document.getElementById(id+'-fill').style.width=v+'%';}
 function fmt(s){if(!s||isNaN(s)||!isFinite(s))return'0:00';return Math.floor(s/60)+':'+(Math.floor(s%60)<10?'0':'')+Math.floor(s%60);}
 function loadJS(src){return new Promise(function(ok,er){var s=document.createElement('script');s.src=src;s.onload=ok;s.onerror=er;document.head.appendChild(s);});}
-var _sc=null,_sc2=null;function getSC(w,h,id){var c=(id===2?_sc2:_sc);if(!c){c=document.createElement('canvas');if(id===2)_sc2=c;else _sc=c;}if(c.width!==w||c.height!==h){c.width=w;c.height=h;}return c;}
+var _sc=null,_sc2=null,_sc3=null;function getSC(w,h,id){var c=(id===3?_sc3:(id===2?_sc2:_sc));if(!c){c=document.createElement('canvas');if(id===3)_sc3=c;else if(id===2)_sc2=c;else _sc=c;}if(c.width!==w||c.height!==h){c.width=w;c.height=h;}return c;}
 var _pScore=null,_pBlur=null,_pRow=null,_pCol=null,_pOut=null;function getBuf(n,id){var b;if(id===1)b=_pScore;else if(id===2)b=_pBlur;else if(id===3)b=_pRow;else if(id===4)b=_pCol;if(!b||b.length<n){b=new Float32Array(n);if(id===1)_pScore=b;else if(id===2)_pBlur=b;else if(id===3)_pRow=b;else if(id===4)_pCol=b;}return b;}
 
 function applyFilter(ctx,src,w,h,forceFallback){
@@ -243,27 +243,27 @@ function isPhotoBlock(imgData){
 }
 
 function applyMixed(ctx,src,w,h,forceFallback){
-  var sc=getSC(w,h);var sctx=sc.getContext('2d');sctx.drawImage(src,0,0,w,h);
-  var srcPx=sctx.getImageData(0,0,w,h).data;
-  var lumSum=0,n=w*h;for(var qi=0;qi<srcPx.length;qi+=4){lumSum+=(srcPx[qi]/255*0.2126+srcPx[qi+1]/255*0.7152+srcPx[qi+2]/255*0.0722);}
-  if(lumSum/n<0.30){ctx.drawImage(src,0,0,w,h);return;}
+  // Quick dark check on 64x64 sample
+  var qsc=getSC(64,64,3),qctx=qsc.getContext('2d');qctx.drawImage(src,0,0,64,64);
+  var qPx=qctx.getImageData(0,0,64,64).data,lumSum=0;
+  for(var qi=0;qi<16384;qi+=4){lumSum+=(qPx[qi]*0.2126+qPx[qi+1]*0.7152+qPx[qi+2]*0.0722);}
+  if((lumSum/(4096*255))<0.30){ctx.drawImage(src,0,0,w,h);return;}
 
-  var sc2=getSC(w,h,2);var sctx2=sc2.getContext('2d');
+  var sc=getSC(w,h);var sctx=sc.getContext('2d');sctx.drawImage(src,0,0,w,h);
+  var idSrc=sctx.getImageData(0,0,w,h),srcPx=idSrc.data;
+  var sc2=getSC(w,h,2),sctx2=sc2.getContext('2d');
   if(ctxFilterOK){sctx2.filter=FILTERS.night;sctx2.drawImage(src,0,0,w,h);sctx2.filter='none';}
   else{applyFilterPixels(sctx2,src,w,h,FILTERS.night);}
   var nightPx=sctx2.getImageData(0,0,w,h).data;
 
-  // Build photo score per pixel (color photos: saturation + mid-luminance)
   var score=getBuf(w*h,1);
   for(var i=0;i<w*h;i++){
     var r=srcPx[i*4]/255,g=srcPx[i*4+1]/255,b=srcPx[i*4+2]/255;
-    var mx=Math.max(r,g,b),mn=Math.min(r,g,b),l=(mx+mn)/2;
+    var mx=(r>g?(r>b?r:b):(g>b?g:b)),mn=(r<g?(r<b?r:b):(g<b?g:b)),l=(mx+mn)/2;
     var s=mx===mn?0:(l<0.5?(mx-mn)/(mx+mn):(mx-mn)/(2-mx-mn));
     var midness=1-Math.abs(l-0.45)*2.5;if(midness<0)midness=0;
     score[i]=Math.min(1,midness*0.6+s*2.5)*(l<0.92?1:0);
   }
-
-  // Box blur radius 12
   var blurred=getBuf(w*h,2),R=12,row=getBuf(w,3),col2=getBuf(h,4);
   for(var y=0;y<h;y++){
     var sum=0,cnt=0;
@@ -275,58 +275,23 @@ function applyMixed(ctx,src,w,h,forceFallback){
     for(var y=0;y<h;y++){sum+=blurred[y*w+x];cnt++;if(y>=R){sum-=blurred[(y-R)*w+x];cnt--;}col2[y]=sum/cnt;}
     for(var y=0;y<h;y++)blurred[y*w+x]=col2[y];
   }
-
-  // Compose: 4 zones
   if(!_pOut||_pOut.width!==w||_pOut.height!==h)_pOut=ctx.createImageData(w,h);
   var out=_pOut;
   for(var i=0;i<w*h;i++){
-    var base=i*4;
-    var r=srcPx[base]/255,g=srcPx[base+1]/255,b=srcPx[base+2]/255;
-    var mx=Math.max(r,g,b),mn=Math.min(r,g,b),l=(mx+mn)/2;
+    var base=i*4,r=srcPx[base]/255,g=srcPx[base+1]/255,b=srcPx[base+2]/255;
+    var mx=(r>g?(r>b?r:b):(g>b?g:b)),mn=(r<g?(r<b?r:b):(g<b?g:b)),l=(mx+mn)/2;
     var s=mx===mn?0:(l<0.5?(mx-mn)/(mx+mn):(mx-mn)/(2-mx-mn));
-
-    // Zone 1: dark AND saturated → dark color photo → pass through
-    if(l<0.28&&s>0.10){
-      out.data[base]=srcPx[base];out.data[base+1]=srcPx[base+1];
-      out.data[base+2]=srcPx[base+2];out.data[base+3]=255;
-      continue;
-    }
-
-    // Zone 2: achromatic mid-luminance → B&W photo pixel → pass through unconditionally
-    // Pixels in this range: s<0.08, 0.07<l<0.93
-    // Text in typical docs is black (l≈0) or white (l≈1) — not caught here
-    // Colored elements (red banners, highlights) have s>0.08 — not caught here
-    // This reliably preserves B&W photographs without any blur-map dependency
-    if(s<0.08&&l>0.07&&l<0.93){
-      out.data[base]=srcPx[base];out.data[base+1]=srcPx[base+1];
-      out.data[base+2]=srcPx[base+2];out.data[base+3]=255;
-      continue;
-    }
-
-    var t=blurred[i];t=t*t*(3-2*t); // smoothstep
-    var sr,sg,sb;
-
-    if(t>0.40){
-      // Zone 3: colorful photo → night mode
-      sr=nightPx[base];sg=nightPx[base+1];sb=nightPx[base+2];
-    }else{
-      // Zone 4: text/bg → smart invert (luminance-only)
-      if(s<0.12){
-        // Achromatic: invert luminance only
-        var v=Math.round((1-l)*255);sr=v;sg=v;sb=v;
-      }else{
-        // Colored (red text, highlights, etc.): preserve hue, invert luminance
-        var hh;
-        if(mx===r)hh=(g-b)/(mx-mn);else if(mx===g)hh=2+(b-r)/(mx-mn);else hh=4+(r-g)/(mx-mn);
-        hh=((hh*60)%360+360)%360;
-        var rgb2=hslToRgb(hh,s,1-l);
-        sr=rgb2[0];sg=rgb2[1];sb=rgb2[2];
+    if(l<0.28&&s>0.10){out.data[base]=srcPx[base];out.data[base+1]=srcPx[base+1];out.data[base+2]=srcPx[base+2];out.data[base+3]=255;continue;}
+    if(s<0.08&&l>0.07&&l<0.93){out.data[base]=srcPx[base];out.data[base+1]=srcPx[base+1];out.data[base+2]=srcPx[base+2];out.data[base+3]=255;continue;}
+    var t=blurred[i],sr,sg,sb;t=t*t*(3-2*t);
+    if(t>0.40){sr=nightPx[base];sg=nightPx[base+1];sb=nightPx[base+2];}
+    else{
+      if(s<0.12){var v=Math.round((1-l)*255);sr=sg=sb=v;}
+      else{
+        var h;if(mx===r)h=(g-b)/(mx-mn);else if(mx===g)h=2+(b-r)/(mx-mn);else h=4+(r-g)/(mx-mn);
+        h=((h*60)%360+360)%360;var rgb2=hslToRgb(h,s,1-l);sr=rgb2[0];sg=rgb2[1];sb=rgb2[2];
       }
-      // Soft blend in transition zone (t 0→0.40)
-      var blend=t/0.40;
-      sr=Math.round(sr*(1-blend)+nightPx[base]*blend);
-      sg=Math.round(sg*(1-blend)+nightPx[base+1]*blend);
-      sb=Math.round(sb*(1-blend)+nightPx[base+2]*blend);
+      var blend=t/0.40;sr=Math.round(sr*(1-blend)+nightPx[base]*blend);sg=Math.round(sg*(1-blend)+nightPx[base+1]*blend);sb=Math.round(sb*(1-blend)+nightPx[base+2]*blend);
     }
     out.data[base]=sr;out.data[base+1]=sg;out.data[base+2]=sb;out.data[base+3]=255;
   }
@@ -798,9 +763,9 @@ async function convertVideoFallback(btn){
   var combined=new MediaStream([].concat(videoTracks,audioTracks));
   console.log('[DDC] Combined:',videoTracks.length,'video +',audioTracks.length,'audio');
 
-  // Bitrate alto per non perdere qualità rispetto all'originale
-  var recOpts={mimeType:mime,videoBitsPerSecond:5000000};
-  if(audioTracks.length>0)recOpts.audioBitsPerSecond=192000;
+  // Bitrate bilanciato per video lunghi
+  var recOpts={mimeType:mime,videoBitsPerSecond:4000000};
+  if(audioTracks.length>0)recOpts.audioBitsPerSecond=128000;
   var rec;try{rec=new MediaRecorder(combined,recOpts);}
   catch(e){
     try{document.body.removeChild(cvid);}catch(e2){}
@@ -888,18 +853,20 @@ async function convertVideoFallback(btn){
     setSt('vid','Errore avvio video: '+e.message,true);btn.disabled=false;startRaf();return;
   }
 
-  // Disegna ogni frame tramite rAF: affidabile, non si blocca come rVFC
+  // Disegna ogni frame tramite rAF o rVFC: affidabile e performante
   function rafLoop(){
     if(recStopped)return;
     if(cvid.ended||(dur&&cvid.currentTime>=dur-0.05)){stopRec();return;}
-    // Disegna solo se il video ha dati decodificati (readyState >= HAVE_CURRENT_DATA)
-    if(cvid.readyState>=2){
-      try{drawFilteredFrame();}catch(e){}
-      if(dur>0) setBar('vid',Math.round((cvid.currentTime/dur)*100));
-    }
-    frameIv=requestAnimationFrame(rafLoop);
+    var process=function(){
+      if(recStopped)return;
+      if(cvid.readyState>=2){try{drawFilteredFrame();}catch(e){}if(dur>0)setBar('vid',Math.round((cvid.currentTime/dur)*100));}
+      if(cvid.requestVideoFrameCallback) cvid.requestVideoFrameCallback(process);
+      else frameIv=requestAnimationFrame(process);
+    };
+    if(cvid.requestVideoFrameCallback) cvid.requestVideoFrameCallback(process);
+    else frameIv=requestAnimationFrame(process);
   }
-  frameIv=requestAnimationFrame(rafLoop);
+  rafLoop();
 
   // Watchdog: se currentTime non avanza per ~10s nonostante l'auto-resume, esci
   var lastT=-1,stallCount=0;
