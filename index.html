@@ -209,7 +209,7 @@ function setBar(id,v){document.getElementById(id+'-fill').style.width=v+'%';}
 function fmt(s){if(!s||isNaN(s)||!isFinite(s))return'0:00';return Math.floor(s/60)+':'+(Math.floor(s%60)<10?'0':'')+Math.floor(s%60);}
 function loadJS(src){return new Promise(function(ok,er){var s=document.createElement('script');s.src=src;s.onload=ok;s.onerror=er;document.head.appendChild(s);});}
 
-function applyFilter(ctx,src,w,h){
+function applyFilter(ctx,src,w,h,forceFallback){
   if(F==='none'||F===FILTERS.gia_dark){ctx.drawImage(src,0,0,w,h);return;}
   if(F===FILTERS.puro){
     // Smart invert: preserves hue → red stays red, blue stays blue
@@ -218,7 +218,7 @@ function applyFilter(ctx,src,w,h){
     var id=tmp2.getContext('2d').getImageData(0,0,w,h);
     smartInvertPixels(id.data);ctx.putImageData(id,0,0);return;
   }
-  if(ctxFilterOK){ctx.filter=F;ctx.drawImage(src,0,0,w,h);ctx.filter='none';}
+  if(ctxFilterOK && !forceFallback){ctx.filter=F;ctx.drawImage(src,0,0,w,h);ctx.filter='none';}
   else{applyFilterPixels(ctx,src,w,h,F);}
 }
 
@@ -239,7 +239,7 @@ function isPhotoBlock(imgData){
   return midR>0.35&&whiteR<0.60&&(avgSat>0.04||midR>0.55);
 }
 
-function applyMixed(ctx,src,w,h){
+function applyMixed(ctx,src,w,h,forceFallback){
   // Source pixels
   var tmp=document.createElement('canvas');tmp.width=w;tmp.height=h;
   tmp.getContext('2d').drawImage(src,0,0,w,h);
@@ -254,7 +254,7 @@ function applyMixed(ctx,src,w,h){
 
   // Night-mode version for photo zones
   var cNight=document.createElement('canvas');cNight.width=w;cNight.height=h;var ctxNight=cNight.getContext('2d');
-  if(ctxFilterOK){ctxNight.filter=FILTERS.night;ctxNight.drawImage(src,0,0,w,h);ctxNight.filter='none';}
+  if(ctxFilterOK && !forceFallback){ctxNight.filter=FILTERS.night;ctxNight.drawImage(src,0,0,w,h);ctxNight.filter='none';}
   else{applyFilterPixels(ctxNight,src,w,h,FILTERS.night);}
   var nightPx=ctxNight.getImageData(0,0,w,h).data;
 
@@ -874,8 +874,8 @@ async function convertVideoFallback(btn){
     var savedF=F,savedMixed=contentMixed;
     F=flt;contentMixed=fltMixed;
     try{
-      if(fltMixed){applyMixed(ex,cvid,w,h);}
-      else{applyFilter(ex,cvid,w,h);}
+      if(fltMixed){applyMixed(ex,cvid,w,h,true);}
+      else{applyFilter(ex,cvid,w,h,true);}
     }catch(e){}
     F=savedF;contentMixed=savedMixed;
   }
