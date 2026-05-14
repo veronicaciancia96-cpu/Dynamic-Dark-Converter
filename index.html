@@ -209,6 +209,7 @@ function setBar(id,v){document.getElementById(id+'-fill').style.width=v+'%';}
 function fmt(s){if(!s||isNaN(s)||!isFinite(s))return'0:00';return Math.floor(s/60)+':'+(Math.floor(s%60)<10?'0':'')+Math.floor(s%60);}
 function loadJS(src){return new Promise(function(ok,er){var s=document.createElement('script');s.src=src;s.onload=ok;s.onerror=er;document.head.appendChild(s);});}
 var _sc=null,_sc2=null;function getSC(w,h,id){var c=(id===2?_sc2:_sc);if(!c){c=document.createElement('canvas');if(id===2)_sc2=c;else _sc=c;}if(c.width!==w||c.height!==h){c.width=w;c.height=h;}return c;}
+var _pScore=null,_pBlur=null,_pRow=null,_pCol=null,_pOut=null;function getBuf(n,id){var b;if(id===1)b=_pScore;else if(id===2)b=_pBlur;else if(id===3)b=_pRow;else if(id===4)b=_pCol;if(!b||b.length<n){b=new Float32Array(n);if(id===1)_pScore=b;else if(id===2)_pBlur=b;else if(id===3)_pRow=b;else if(id===4)_pCol=b;}return b;}
 
 function applyFilter(ctx,src,w,h,forceFallback){
   if(F==='none'||F===FILTERS.gia_dark){ctx.drawImage(src,0,0,w,h);return;}
@@ -219,7 +220,7 @@ function applyFilter(ctx,src,w,h,forceFallback){
   if(ctxFilterOK && !forceFallback){ctx.filter=F;ctx.drawImage(src,0,0,w,h);ctx.filter='none';}
   else if(ctxFilterOK && forceFallback){
     var sc=getSC(w,h);var sctx=sc.getContext('2d');sctx.filter=F;sctx.drawImage(src,0,0,w,h);sctx.filter='none';
-    ctx.putImageData(sctx.getImageData(0,0,w,h),0,0);
+    ctx.drawImage(sc,0,0);
   }
   else{applyFilterPixels(ctx,src,w,h,F);}
 }
@@ -253,7 +254,7 @@ function applyMixed(ctx,src,w,h,forceFallback){
   var nightPx=sctx2.getImageData(0,0,w,h).data;
 
   // Build photo score per pixel (color photos: saturation + mid-luminance)
-  var score=new Float32Array(w*h);
+  var score=getBuf(w*h,1);
   for(var i=0;i<w*h;i++){
     var r=srcPx[i*4]/255,g=srcPx[i*4+1]/255,b=srcPx[i*4+2]/255;
     var mx=Math.max(r,g,b),mn=Math.min(r,g,b),l=(mx+mn)/2;
@@ -263,7 +264,7 @@ function applyMixed(ctx,src,w,h,forceFallback){
   }
 
   // Box blur radius 12
-  var blurred=new Float32Array(w*h),R=12,row=new Float32Array(w),col2=new Float32Array(h);
+  var blurred=getBuf(w*h,2),R=12,row=getBuf(w,3),col2=getBuf(h,4);
   for(var y=0;y<h;y++){
     var sum=0,cnt=0;
     for(var x=0;x<w;x++){sum+=score[y*w+x];cnt++;if(x>=R){sum-=score[y*w+x-R];cnt--;}row[x]=sum/cnt;}
@@ -276,11 +277,8 @@ function applyMixed(ctx,src,w,h,forceFallback){
   }
 
   // Compose: 4 zones
-  // 1. Dark + saturated         → dark color photo zone → pass through
-  // 2. Achromatic + mid-lum + blurred score > 0.25 → B&W photo → pass through
-  // 3. Colored photo zone (t>0.55) → night mode (dimmed)
-  // 4. Text/bg zone             → smart invert (hue-preserving)
-  var out=ctx.createImageData(w,h);
+  if(!_pOut||_pOut.width!==w||_pOut.height!==h)_pOut=ctx.createImageData(w,h);
+  var out=_pOut;
   for(var i=0;i<w*h;i++){
     var base=i*4;
     var r=srcPx[base]/255,g=srcPx[base+1]/255,b=srcPx[base+2]/255;
@@ -715,7 +713,7 @@ async function convertVideoFallback(btn){
   //    stesso elemento che è già in riproduzione visibile (osservato su file://).
   var cvid=document.createElement('video');
   cvid.style.position='fixed';cvid.style.left='0';cvid.style.top='0';
-  cvid.style.width='160px';cvid.style.height='120px';cvid.style.opacity='0.02';
+  cvid.style.width='320px';cvid.style.height='240px';cvid.style.opacity='0.03';
   cvid.style.pointerEvents='none';cvid.style.zIndex='-1';
   cvid.preload='auto';cvid.playsInline=true;cvid.muted=false;cvid.volume=1.0;cvid.playbackRate=1.0;
   // Riusa la stessa sorgente del preview (blob: URL o file caricato)
