@@ -677,8 +677,8 @@ async function convertVideoFallback(btn){
   //    Evita il problema "il preview si pausa" causato da captureStream sullo
   //    stesso elemento che è già in riproduzione visibile (osservato su file://).
   var cvid=document.createElement('video');
-  cvid.style.position='fixed';cvid.style.left='0';cvid.style.top='0';
-  cvid.style.width='320px';cvid.style.height='240px';cvid.style.opacity='0.03';
+  cvid.style.position='fixed';cvid.style.left='-10000px';cvid.style.top='-10000px';
+  cvid.style.width='1px';cvid.style.height='1px';cvid.style.opacity='0';
   cvid.style.pointerEvents='none';cvid.style.zIndex='-1';
   cvid.preload='auto';cvid.playsInline=true;cvid.muted=false;cvid.volume=1.0;cvid.playbackRate=1.0;
   // Riusa la stessa sorgente del preview (blob: URL o file caricato)
